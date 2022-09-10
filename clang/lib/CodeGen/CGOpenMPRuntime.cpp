@@ -8645,8 +8645,6 @@ private:
         assert(!std::get<1>(L).empty() &&
                "Not expecting empty list of components!");
         const ValueDecl *VD = std::get<1>(L).back().getAssociatedDeclaration();
-        // printf("BEFORE\n\n");
-        // CGF.CurFn->dump();
         if (!Processed.insert(VD).second)
           continue;
         VD = cast<ValueDecl>(VD->getCanonicalDecl());
@@ -8676,9 +8674,6 @@ private:
             continue;
         }
 
-        // printf("AFTER\n\n");
-        // CGF.CurFn->dump();
-
         // We didn't find any match in our map information - generate a zero
         // size array section - if the pointer is a struct member we defer this
         // action until the whole struct has been processed.
@@ -8695,31 +8690,11 @@ private:
                   nullptr, nullptr, /*ForDeviceAddr=*/true);
           DeferredInfo[nullptr].emplace_back(IE, VD, /*ForDeviceAddr=*/true);
         } else {
-          printf("BLAAAAAAAAAAAAAA\n");
           llvm::Value *Ptr;
-          printf("IE->isGLValue() = %d\n", IE->isGLValue());
-          printf("IE->isLValue() = %d\n", IE->isLValue());
-          printf("IE->isPRValue() = %d\n", IE->isPRValue());
-          printf("IE->isXValue() = %d\n", IE->isXValue());
-          printf("IS POINTER TYPE = %d\n", IE->getType()->isPointerType());
-          if (IE->isGLValue() && !IE->getType()->isPointerType()) {
-          // if (IE->isGLValue()) {
-            // QualType T = CGF.getContext().getCanonicalType(IE->getType());
-            // printf("T.isReferenceType() = %d\n", IE->getType()->isPointerType());
-            // if (T.>isReferenceType()) {
-            //   printf("")
-            // }
-            printf("CHOICE A\n");
+          if (IE->isGLValue() && !IE->getType()->isPointerType())
             Ptr = CGF.EmitLValue(IE).getPointer(CGF);
-            // Ptr = CGF.EmitLoadOfScalar(CGF.EmitLValue(IE), IE->getExprLoc());
-          } else {
-            printf("CHOICE B\n");
+          else
             Ptr = CGF.EmitScalarExpr(IE);
-          }
-          // cout << CGF.EmitLValue(IE) << "\n";
-          // CGF.EmitLValue(IE).getPointer(CGF)->dump();
-          // CGF.EmitScalarExpr(IE)->dump();
-          // Ptr->dump();
           CombinedInfo.Exprs.push_back(VD);
           CombinedInfo.BasePointers.emplace_back(Ptr, VD);
           CombinedInfo.Pointers.push_back(Ptr);

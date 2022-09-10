@@ -7245,7 +7245,6 @@ void CodeGenFunction::EmitOMPUseDeviceAddrClause(
     if (const auto *OED = dyn_cast<OMPCapturedExprDecl>(MatchingVD)) {
       // OMPCapturedExprDecl are used to privative fields of the current
       // structure.
-      printf("It's a struct!\n");
       const auto *ME = cast<MemberExpr>(OED->getInit());
       assert(isa<CXXThisExpr>(ME->getBase()) &&
              "Base should be the current struct!");
@@ -7264,22 +7263,14 @@ void CodeGenFunction::EmitOMPUseDeviceAddrClause(
     // correct mapping, since the pointer to the data was passed to the runtime.
     // Pointer types are already mapped correctly so no need to do a load unless
     // the pointer type is part of a struct.
-    printf("is decl ref expr = %d\n", isa<DeclRefExpr>(Ref->IgnoreParenImpCasts()));
-    printf("is array type = %d\n", MatchingVD->getType()->isArrayType());
-    printf("is pointer type = %d\n", MatchingVD->getType()->isPointerType());
     if ((isa<DeclRefExpr>(Ref->IgnoreParenImpCasts()) ||
         MatchingVD->getType()->isArrayType()) &&
         (isPartOfAStruct || !MatchingVD->getType()->isPointerType())) {
-    // if ((isa<DeclRefExpr>(Ref->IgnoreParenImpCasts()) ||
-    //     MatchingVD->getType()->isArrayType())) {
-      printf("LOAD\n");
       QualType PtrTy = getContext().getPointerType(
           OrigVD->getType().getNonReferenceType());
       PrivAddr = EmitLoadOfPointer(
           Builder.CreateElementBitCast(PrivAddr, ConvertTypeForMem(PtrTy)),
           PtrTy->castAs<PointerType>());
-    } else {
-      printf("NO LOAD\n");
     }
 
     (void)PrivateScope.addPrivate(OrigVD, PrivAddr);
