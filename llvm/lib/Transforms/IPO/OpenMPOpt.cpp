@@ -799,6 +799,7 @@ struct OpenMPOpt {
   bool run(bool IsModulePass) {
     if (SCC.empty())
       return false;
+    printf("===> OpenMPOpt::run with 1 arg\n");
 
     bool Changed = false;
 
@@ -2131,6 +2132,7 @@ private:
 
     registerAAs(IsModulePass);
 
+    printf("Calling runAttributor on SCC\n");
     ChangeStatus Changed = A.run();
 
     LLVM_DEBUG(dbgs() << "[Attributor] Done with " << SCC.size()
@@ -4987,6 +4989,7 @@ PreservedAnalyses OpenMPOptPass::run(Module &M, ModuleAnalysisManager &AM) {
     return PreservedAnalyses::all();
   if (DisableOpenMPOptimizations)
     return PreservedAnalyses::all();
+  printf("===> OpenMPOptPass::run with 2 args\n");
 
   FunctionAnalysisManager &FAM =
       AM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
@@ -5065,6 +5068,7 @@ PreservedAnalyses OpenMPOptPass::run(Module &M, ModuleAnalysisManager &AM) {
   Attributor A(Functions, InfoCache, AC);
 
   OpenMPOpt OMPOpt(SCC, CGUpdater, OREGetter, InfoCache, A);
+  printf("Calling OMPOpt.run(true)\n");
   bool Changed = OMPOpt.run(true);
 
   // Optionally inline device functions for potentially better performance.
@@ -5091,6 +5095,7 @@ PreservedAnalyses OpenMPOptCGSCCPass::run(LazyCallGraph::SCC &C,
     return PreservedAnalyses::all();
   if (DisableOpenMPOptimizations)
     return PreservedAnalyses::all();
+  printf("===> OpenMPOptCGSCCPass::run with 4 args\n");
 
   SmallVector<Function *, 16> SCC;
   // If there are kernels in the module, we have to run on all SCC's.
@@ -5140,6 +5145,7 @@ PreservedAnalyses OpenMPOptCGSCCPass::run(LazyCallGraph::SCC &C,
   Attributor A(Functions, InfoCache, AC);
 
   OpenMPOpt OMPOpt(SCC, CGUpdater, OREGetter, InfoCache, A);
+  printf("Calling OMPOpt.run(false)\n");
   bool Changed = OMPOpt.run(false);
 
   if (PrintModuleAfterOptimizations)
@@ -5219,6 +5225,7 @@ struct OpenMPOptCGSCCLegacyPass : public CallGraphSCCPass {
     Attributor A(Functions, InfoCache, AC);
 
     OpenMPOpt OMPOpt(SCC, CGUpdater, OREGetter, InfoCache, A);
+    printf("Calling LEGACY OMPOpt.run(false)\n");
     bool Result = OMPOpt.run(false);
 
     if (PrintModuleAfterOptimizations)
