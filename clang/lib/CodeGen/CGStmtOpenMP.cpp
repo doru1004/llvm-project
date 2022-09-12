@@ -7264,7 +7264,7 @@ void CodeGenFunction::EmitOMPUseDeviceAddrClause(
     // Pointer types are already mapped correctly so no need to do a load unless
     // the pointer type is part of a struct.
     if ((isa<DeclRefExpr>(Ref->IgnoreParenImpCasts()) ||
-        MatchingVD->getType()->isArrayType()) &&
+         MatchingVD->getType()->isArrayType()) &&
         (isPartOfAStruct || !MatchingVD->getType()->isPointerType())) {
       QualType PtrTy = getContext().getPointerType(
           OrigVD->getType().getNonReferenceType());
