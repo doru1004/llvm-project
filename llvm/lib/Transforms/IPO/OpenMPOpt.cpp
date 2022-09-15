@@ -3167,6 +3167,8 @@ struct AAKernelInfoFunction : AAKernelInfo {
     // to avoid other parts using the current constant value for simpliication.
     auto &OMPInfoCache = static_cast<OMPInformationCache &>(A.getInfoCache());
 
+    printf("AAKernelInfoFunction initialize\n");
+
     Function *Fn = getAnchorScope();
 
     OMPInformationCache::RuntimeFunctionInfo &InitRFI =
@@ -3328,13 +3330,16 @@ struct AAKernelInfoFunction : AAKernelInfo {
   ChangeStatus manifest(Attributor &A) override {
     // If we are not looking at a kernel with __kmpc_target_init and
     // __kmpc_target_deinit call we cannot actually manifest the information.
+    printf("START OF MANIFEST FUNCTION FOR SPMD-ization!\n");
     if (!KernelInitCB || !KernelDeinitCB)
       return ChangeStatus::UNCHANGED;
 
     // If we can we change the execution mode to SPMD-mode otherwise we build a
     // custom state machine.
     ChangeStatus Changed = ChangeStatus::UNCHANGED;
-    if (!changeToSPMDMode(A, Changed))
+    bool changeToSPMD = changeToSPMDMode(A, Changed);
+    printf("===========================================> %d\n", changeToSPMD);
+    if (!changeToSPMD)
       return buildCustomStateMachine(A);
 
     return Changed;
