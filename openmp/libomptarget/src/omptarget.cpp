@@ -627,6 +627,11 @@ int targetDataBegin(ident_t *Loc, DeviceTy &Device, int32_t ArgNum,
       } else
         Device.ShadowMtx.unlock();
     }
+
+    // Check if variable can be used on the device:
+    if (!IsImplicit && !TPR.isPresent() && !TPR.isContained() && !TPR.isHostPointer())
+      MESSAGE("Variable %s is not present and is not a valid host pointer\n",
+              (HstPtrName) ? getNameFromMapping(HstPtrName).c_str() : "unknown");
   }
 
   return OFFLOAD_SUCCESS;
