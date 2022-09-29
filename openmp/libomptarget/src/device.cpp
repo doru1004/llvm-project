@@ -356,7 +356,9 @@ TargetPointerResultTy DeviceTy::getTargetPointer(
     }
   }
 
-  return {{IsNew, IsHostPtr, IsPresent, LR.Flags.IsContained}, Entry, TargetPointer};
+  return {{IsNew, IsHostPtr, IsPresent, LR.Flags.IsContained},
+          Entry,
+          TargetPointer};
 }
 
 // Used by targetDataBegin, targetDataEnd, targetDataUpdate and target.

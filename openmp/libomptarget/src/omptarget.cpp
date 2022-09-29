@@ -629,9 +629,12 @@ int targetDataBegin(ident_t *Loc, DeviceTy &Device, int32_t ArgNum,
     }
 
     // Check if variable can be used on the device:
-    if (!IsImplicit && !TPR.isPresent() && !TPR.isContained() && !TPR.isHostPointer())
-      MESSAGE("Variable %s is not present and is not a valid host pointer\n",
-              (HstPtrName) ? getNameFromMapping(HstPtrName).c_str() : "unknown");
+    bool IsStructMember = ArgTypes[I] & OMP_TGT_MAPTYPE_MEMBER_OF;
+    if (ArgTypes[I] != 0 && !IsStructMember && !IsImplicit && !TPR.isPresent() && !TPR.isContained() &&
+        !TPR.isHostPointer())
+      MESSAGE("variable %s does not have a valid device counterpart\n",
+              (HstPtrName) ? getNameFromMapping(HstPtrName).c_str()
+                           : "unknown");
   }
 
   return OFFLOAD_SUCCESS;
