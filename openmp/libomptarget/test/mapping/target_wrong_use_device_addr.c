@@ -2,7 +2,6 @@
 // RUN: %libomptarget-run-fail-generic 2>&1 \
 // RUN: | %fcheck-generic
 
-
 #include <stdio.h>
 
 int main() {
@@ -12,13 +11,14 @@ int main() {
   // CHECK: host addr=0x[[#%x,HOST_ADDR:]]
   fprintf(stderr, "host addr=%p\n", x);
 
-  #pragma omp target data map(to:x[0:10])
+#pragma omp target data map(to : x [0:10])
   {
-    // CHECK: Libomptarget message: variable x does not have a valid device counterpart
-    #pragma omp target data use_device_addr(x)
+// CHECK: Libomptarget message: variable x does not have a valid device
+// counterpart
+#pragma omp target data use_device_addr(x)
     {
-        // CHECK-NOT: device addr=0x[[#%x,HOST_ADDR:]]
-        fprintf(stderr, "device addr=%p\n", x);
+      // CHECK-NOT: device addr=0x[[#%x,HOST_ADDR:]]
+      fprintf(stderr, "device addr=%p\n", x);
     }
   }
 
