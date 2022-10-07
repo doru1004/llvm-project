@@ -630,9 +630,10 @@ int targetDataBegin(ident_t *Loc, DeviceTy &Device, int32_t ArgNum,
 
     // Check if variable can be used on the device:
     bool IsStructMember = ArgTypes[I] & OMP_TGT_MAPTYPE_MEMBER_OF;
-    if (ArgTypes[I] != 0 && !IsStructMember && !IsImplicit &&
+    if (getInfoLevel() & OMP_INFOTYPE_EMPTY_MAPPING && ArgTypes[I] != 0 && !IsStructMember && !IsImplicit &&
         !TPR.isPresent() && !TPR.isContained() && !TPR.isHostPointer())
-      MESSAGE("variable %s does not have a valid device counterpart\n",
+      INFO(OMP_INFOTYPE_EMPTY_MAPPING, Device.DeviceID,
+           "variable %s does not have a valid device counterpart\n",
               (HstPtrName) ? getNameFromMapping(HstPtrName).c_str()
                            : "unknown");
   }
