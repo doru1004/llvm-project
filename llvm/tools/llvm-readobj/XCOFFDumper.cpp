@@ -224,7 +224,8 @@ void XCOFFDumper::printLoaderSectionSymbolsHelper(uintptr_t LoaderSectionAddr) {
        ++i, ++LoadSecSymEntPtr) {
     if (Error E = Binary::checkOffset(
             Obj.getMemoryBufferRef(),
-            LoaderSectionAddr + (i * sizeof(LoaderSectionSymbolEntry)),
+            LoaderSectionAddr + uintptr_t(LoadSecHeader->getOffsetToSymTbl()) +
+                (i * sizeof(LoaderSectionSymbolEntry)),
             sizeof(LoaderSectionSymbolEntry))) {
       reportUniqueWarning(std::move(E));
       return;
