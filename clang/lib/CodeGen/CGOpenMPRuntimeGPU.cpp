@@ -240,9 +240,13 @@ class CheckVarsEscapingDeclContext final
             return;
         }
         if (!FD->getType()->isReferenceType()) {
-          assert(!VD->getType()->isVariablyModifiedType() &&
+          bool IsVMTTy = VD->getType()->isVariablyModifiedType();
+          assert((!IsVMTTy || (IsVMTTy && !IsForCombinedParallelRegion)) &&
                  "Parameter captured by value with variably modified type");
-          EscapedParameters.insert(VD);
+          if (!IsVMTTy)
+            EscapedParameters.insert(VD);
+          else if (!IsForCombinedParallelRegion)
+            return;
         } else if (!IsForCombinedParallelRegion) {
           return;
         }
