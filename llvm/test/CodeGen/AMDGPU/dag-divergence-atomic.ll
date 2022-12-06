@@ -155,14 +155,27 @@ define protected amdgpu_kernel void @max(i32 addrspace(1)* %p, %S addrspace(1)* 
 ; CHECK-LABEL: max:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
-; CHECK-NEXT:    v_mov_b32_e32 v0, 0
-; CHECK-NEXT:    v_mov_b32_e32 v1, 1
+; CHECK-NEXT:    s_mov_b64 s[4:5], 0
+; CHECK-NEXT:    v_mov_b32_e32 v1, 0
 ; CHECK-NEXT:    s_waitcnt lgkmcnt(0)
-; CHECK-NEXT:    global_atomic_smax v2, v0, v1, s[0:1] glc
-; CHECK-NEXT:    v_mov_b32_e32 v0, s2
-; CHECK-NEXT:    v_mov_b32_e32 v1, s3
+; CHECK-NEXT:    s_load_dword s6, s[0:1], 0x0
+; CHECK-NEXT:    s_waitcnt lgkmcnt(0)
+; CHECK-NEXT:    v_mov_b32_e32 v0, s6
+; CHECK-NEXT:  .LBB6_1: ; %atomicrmw.start
+; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    v_mov_b32_e32 v3, v0
+; CHECK-NEXT:    v_max_i32_e32 v2, 1, v3
+; CHECK-NEXT:    global_atomic_cmpswap v0, v1, v[2:3], s[0:1] glc
 ; CHECK-NEXT:    s_waitcnt vmcnt(0)
-; CHECK-NEXT:    v_mad_u64_u32 v[0:1], s[0:1], v2, 12, v[0:1]
+; CHECK-NEXT:    v_cmp_eq_u32_e32 vcc, v0, v3
+; CHECK-NEXT:    s_or_b64 s[4:5], vcc, s[4:5]
+; CHECK-NEXT:    s_andn2_b64 exec, exec, s[4:5]
+; CHECK-NEXT:    s_cbranch_execnz .LBB6_1
+; CHECK-NEXT:  ; %bb.2: ; %atomicrmw.end
+; CHECK-NEXT:    s_or_b64 exec, exec, s[4:5]
+; CHECK-NEXT:    v_mov_b32_e32 v2, s2
+; CHECK-NEXT:    v_mov_b32_e32 v3, s3
+; CHECK-NEXT:    v_mad_u64_u32 v[0:1], s[0:1], v0, 12, v[2:3]
 ; CHECK-NEXT:    v_mov_b32_e32 v2, 1.0
 ; CHECK-NEXT:    global_store_dword v[0:1], v2, off
 ; CHECK-NEXT:    s_endpgm
@@ -177,14 +190,27 @@ define protected amdgpu_kernel void @min(i32 addrspace(1)* %p, %S addrspace(1)* 
 ; CHECK-LABEL: min:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
-; CHECK-NEXT:    v_mov_b32_e32 v0, 0
-; CHECK-NEXT:    v_mov_b32_e32 v1, 1
+; CHECK-NEXT:    s_mov_b64 s[4:5], 0
+; CHECK-NEXT:    v_mov_b32_e32 v1, 0
 ; CHECK-NEXT:    s_waitcnt lgkmcnt(0)
-; CHECK-NEXT:    global_atomic_smin v2, v0, v1, s[0:1] glc
-; CHECK-NEXT:    v_mov_b32_e32 v0, s2
-; CHECK-NEXT:    v_mov_b32_e32 v1, s3
+; CHECK-NEXT:    s_load_dword s6, s[0:1], 0x0
+; CHECK-NEXT:    s_waitcnt lgkmcnt(0)
+; CHECK-NEXT:    v_mov_b32_e32 v0, s6
+; CHECK-NEXT:  .LBB7_1: ; %atomicrmw.start
+; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    v_mov_b32_e32 v3, v0
+; CHECK-NEXT:    v_min_i32_e32 v2, 1, v3
+; CHECK-NEXT:    global_atomic_cmpswap v0, v1, v[2:3], s[0:1] glc
 ; CHECK-NEXT:    s_waitcnt vmcnt(0)
-; CHECK-NEXT:    v_mad_u64_u32 v[0:1], s[0:1], v2, 12, v[0:1]
+; CHECK-NEXT:    v_cmp_eq_u32_e32 vcc, v0, v3
+; CHECK-NEXT:    s_or_b64 s[4:5], vcc, s[4:5]
+; CHECK-NEXT:    s_andn2_b64 exec, exec, s[4:5]
+; CHECK-NEXT:    s_cbranch_execnz .LBB7_1
+; CHECK-NEXT:  ; %bb.2: ; %atomicrmw.end
+; CHECK-NEXT:    s_or_b64 exec, exec, s[4:5]
+; CHECK-NEXT:    v_mov_b32_e32 v2, s2
+; CHECK-NEXT:    v_mov_b32_e32 v3, s3
+; CHECK-NEXT:    v_mad_u64_u32 v[0:1], s[0:1], v0, 12, v[2:3]
 ; CHECK-NEXT:    v_mov_b32_e32 v2, 1.0
 ; CHECK-NEXT:    global_store_dword v[0:1], v2, off
 ; CHECK-NEXT:    s_endpgm
@@ -199,14 +225,27 @@ define protected amdgpu_kernel void @umax(i32 addrspace(1)* %p, %S addrspace(1)*
 ; CHECK-LABEL: umax:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
-; CHECK-NEXT:    v_mov_b32_e32 v0, 0
-; CHECK-NEXT:    v_mov_b32_e32 v1, 1
+; CHECK-NEXT:    s_mov_b64 s[4:5], 0
+; CHECK-NEXT:    v_mov_b32_e32 v1, 0
 ; CHECK-NEXT:    s_waitcnt lgkmcnt(0)
-; CHECK-NEXT:    global_atomic_umax v2, v0, v1, s[0:1] glc
-; CHECK-NEXT:    v_mov_b32_e32 v0, s2
-; CHECK-NEXT:    v_mov_b32_e32 v1, s3
+; CHECK-NEXT:    s_load_dword s6, s[0:1], 0x0
+; CHECK-NEXT:    s_waitcnt lgkmcnt(0)
+; CHECK-NEXT:    v_mov_b32_e32 v0, s6
+; CHECK-NEXT:  .LBB8_1: ; %atomicrmw.start
+; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    v_mov_b32_e32 v3, v0
+; CHECK-NEXT:    v_max_u32_e32 v2, 1, v3
+; CHECK-NEXT:    global_atomic_cmpswap v0, v1, v[2:3], s[0:1] glc
 ; CHECK-NEXT:    s_waitcnt vmcnt(0)
-; CHECK-NEXT:    v_mad_u64_u32 v[0:1], s[0:1], v2, 12, v[0:1]
+; CHECK-NEXT:    v_cmp_eq_u32_e32 vcc, v0, v3
+; CHECK-NEXT:    s_or_b64 s[4:5], vcc, s[4:5]
+; CHECK-NEXT:    s_andn2_b64 exec, exec, s[4:5]
+; CHECK-NEXT:    s_cbranch_execnz .LBB8_1
+; CHECK-NEXT:  ; %bb.2: ; %atomicrmw.end
+; CHECK-NEXT:    s_or_b64 exec, exec, s[4:5]
+; CHECK-NEXT:    v_mov_b32_e32 v2, s2
+; CHECK-NEXT:    v_mov_b32_e32 v3, s3
+; CHECK-NEXT:    v_mad_u64_u32 v[0:1], s[0:1], v0, 12, v[2:3]
 ; CHECK-NEXT:    v_mov_b32_e32 v2, 1.0
 ; CHECK-NEXT:    global_store_dword v[0:1], v2, off
 ; CHECK-NEXT:    s_endpgm
@@ -221,14 +260,27 @@ define protected amdgpu_kernel void @umin(i32 addrspace(1)* %p, %S addrspace(1)*
 ; CHECK-LABEL: umin:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
-; CHECK-NEXT:    v_mov_b32_e32 v0, 0
-; CHECK-NEXT:    v_mov_b32_e32 v1, 1
+; CHECK-NEXT:    s_mov_b64 s[4:5], 0
+; CHECK-NEXT:    v_mov_b32_e32 v1, 0
 ; CHECK-NEXT:    s_waitcnt lgkmcnt(0)
-; CHECK-NEXT:    global_atomic_umin v2, v0, v1, s[0:1] glc
-; CHECK-NEXT:    v_mov_b32_e32 v0, s2
-; CHECK-NEXT:    v_mov_b32_e32 v1, s3
+; CHECK-NEXT:    s_load_dword s6, s[0:1], 0x0
+; CHECK-NEXT:    s_waitcnt lgkmcnt(0)
+; CHECK-NEXT:    v_mov_b32_e32 v0, s6
+; CHECK-NEXT:  .LBB9_1: ; %atomicrmw.start
+; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    v_mov_b32_e32 v3, v0
+; CHECK-NEXT:    v_min_u32_e32 v2, 1, v3
+; CHECK-NEXT:    global_atomic_cmpswap v0, v1, v[2:3], s[0:1] glc
 ; CHECK-NEXT:    s_waitcnt vmcnt(0)
-; CHECK-NEXT:    v_mad_u64_u32 v[0:1], s[0:1], v2, 12, v[0:1]
+; CHECK-NEXT:    v_cmp_eq_u32_e32 vcc, v0, v3
+; CHECK-NEXT:    s_or_b64 s[4:5], vcc, s[4:5]
+; CHECK-NEXT:    s_andn2_b64 exec, exec, s[4:5]
+; CHECK-NEXT:    s_cbranch_execnz .LBB9_1
+; CHECK-NEXT:  ; %bb.2: ; %atomicrmw.end
+; CHECK-NEXT:    s_or_b64 exec, exec, s[4:5]
+; CHECK-NEXT:    v_mov_b32_e32 v2, s2
+; CHECK-NEXT:    v_mov_b32_e32 v3, s3
+; CHECK-NEXT:    v_mad_u64_u32 v[0:1], s[0:1], v0, 12, v[2:3]
 ; CHECK-NEXT:    v_mov_b32_e32 v2, 1.0
 ; CHECK-NEXT:    global_store_dword v[0:1], v2, off
 ; CHECK-NEXT:    s_endpgm
