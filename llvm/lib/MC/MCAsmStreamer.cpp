@@ -203,7 +203,7 @@ public:
 
   void emitELFSize(MCSymbol *Symbol, const MCExpr *Value) override;
   void emitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                        unsigned ByteAlignment) override;
+                        Align ByteAlignment) override;
 
   /// Emit a local common (.lcomm) symbol.
   ///
@@ -218,7 +218,7 @@ public:
                     SMLoc Loc = SMLoc()) override;
 
   void emitTBSSSymbol(MCSection *Section, MCSymbol *Symbol, uint64_t Size,
-                      unsigned ByteAlignment = 0) override;
+                      Align ByteAlignment = Align(1)) override;
 
   void emitBinaryData(StringRef Data) override;
 
@@ -970,15 +970,15 @@ void MCAsmStreamer::emitELFSize(MCSymbol *Symbol, const MCExpr *Value) {
 }
 
 void MCAsmStreamer::emitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                                     unsigned ByteAlignment) {
+                                     Align ByteAlignment) {
   OS << "\t.comm\t";
   Symbol->print(OS, MAI);
   OS << ',' << Size;
 
   if (MAI->getCOMMDirectiveAlignmentIsInBytes())
-    OS << ',' << ByteAlignment;
+    OS << ',' << ByteAlignment.value();
   else
-    OS << ',' << Log2_32(ByteAlignment);
+    OS << ',' << Log2(ByteAlignment);
   EmitEOL();
 
   // Print symbol's rename (original name contains invalid character(s)) if
@@ -986,7 +986,6 @@ void MCAsmStreamer::emitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
   MCSymbolXCOFF *XSym = dyn_cast<MCSymbolXCOFF>(Symbol);
   if (XSym && XSym->hasRename())
     emitXCOFFRenameDirective(XSym, XSym->getSymbolTableName());
-
 }
 
 void MCAsmStreamer::emitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
@@ -1039,7 +1038,7 @@ void MCAsmStreamer::emitZerofill(MCSection *Section, MCSymbol *Symbol,
 // This depends that the symbol has already been mangled from the original,
 // e.g. _a.
 void MCAsmStreamer::emitTBSSSymbol(MCSection *Section, MCSymbol *Symbol,
-                                   uint64_t Size, unsigned ByteAlignment) {
+                                   uint64_t Size, Align ByteAlignment) {
   assignFragment(Symbol, &Section->getDummyFragment());
 
   assert(Symbol && "Symbol shouldn't be NULL!");
@@ -1055,7 +1054,8 @@ void MCAsmStreamer::emitTBSSSymbol(MCSection *Section, MCSymbol *Symbol,
 
   // Output align if we have it.  We default to 1 so don't bother printing
   // that.
-  if (ByteAlignment > 1) OS << ", " << Log2_32(ByteAlignment);
+  if (ByteAlignment > 1)
+    OS << ", " << Log2(ByteAlignment);
 
   EmitEOL();
 }

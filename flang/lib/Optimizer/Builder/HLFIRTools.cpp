@@ -76,7 +76,7 @@ hlfir::translateToExtendedValue(mlir::Location loc, fir::FirOpBuilder &builder,
   if (entity.isVariable()) {
     if (entity.isScalar() && !entity.hasLengthParameters() &&
         !hlfir::isBoxAddressOrValueType(entity.getType()))
-      return {fir::ExtendedValue{entity.getBase()}, llvm::None};
+      return {fir::ExtendedValue{entity.getBase()}, std::nullopt};
     TODO(loc, "HLFIR variable to fir::ExtendedValue without a "
               "FortranVariableOpInterface");
   }
@@ -144,7 +144,7 @@ hlfir::genDeclare(mlir::Location loc, fir::FirOpBuilder &builder,
                   fir::FortranVariableFlagsAttr flags) {
 
   mlir::Value base = fir::getBase(exv);
-  assert(fir::isa_passbyref_type(base.getType()) &&
+  assert(fir::conformsWithPassByRef(base.getType()) &&
          "entity being declared must be in memory");
   mlir::Value shapeOrShift;
   llvm::SmallVector<mlir::Value> lenParams;

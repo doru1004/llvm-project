@@ -164,7 +164,7 @@ bool MCWasmStreamer::emitSymbolAttribute(MCSymbol *S, MCSymbolAttr Attribute) {
 }
 
 void MCWasmStreamer::emitCommonSymbol(MCSymbol *S, uint64_t Size,
-                                      unsigned ByteAlignment) {
+                                      Align ByteAlignment) {
   llvm_unreachable("Common symbols are not yet implemented for Wasm");
 }
 
@@ -269,7 +269,7 @@ void MCWasmStreamer::emitZerofill(MCSection *Section, MCSymbol *Symbol,
 }
 
 void MCWasmStreamer::emitTBSSSymbol(MCSection *Section, MCSymbol *Symbol,
-                                    uint64_t Size, unsigned ByteAlignment) {
+                                    uint64_t Size, Align ByteAlignment) {
   llvm_unreachable("Wasm doesn't support this directive");
 }
 

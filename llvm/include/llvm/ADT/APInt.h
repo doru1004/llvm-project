@@ -20,6 +20,7 @@
 #include <cassert>
 #include <climits>
 #include <cstring>
+#include <optional>
 #include <utility>
 
 namespace llvm {
@@ -30,7 +31,6 @@ class raw_ostream;
 
 template <typename T> class SmallVectorImpl;
 template <typename T> class ArrayRef;
-template <typename T> class Optional;
 template <typename T, typename Enable> struct DenseMapInfo;
 
 class APInt;
@@ -2248,13 +2248,13 @@ APInt RoundingSDiv(const APInt &A, const APInt &B, APInt::Rounding RM);
 ///
 /// The returned value may have a different bit width from the input
 /// coefficients.
-Optional<APInt> SolveQuadraticEquationWrap(APInt A, APInt B, APInt C,
-                                           unsigned RangeWidth);
+std::optional<APInt> SolveQuadraticEquationWrap(APInt A, APInt B, APInt C,
+                                                unsigned RangeWidth);
 
 /// Compare two values, and if they are different, return the position of the
 /// most significant bit that is different in the values.
-Optional<unsigned> GetMostSignificantDifferentBit(const APInt &A,
-                                                  const APInt &B);
+std::optional<unsigned> GetMostSignificantDifferentBit(const APInt &A,
+                                                       const APInt &B);
 
 /// Splat/Merge neighboring bits to widen/narrow the bitmask represented
 /// by \param A to \param NewBitWidth bits.

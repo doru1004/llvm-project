@@ -134,8 +134,8 @@ public:
   /// Return if this operation is registered.
   bool isRegistered() const { return impl->isRegistered(); }
 
-  /// If this operation is registered, returns the registered information, None
-  /// otherwise.
+  /// If this operation is registered, returns the registered information,
+  /// std::nullopt otherwise.
   Optional<RegisteredOperationName> getRegisteredInfo() const;
 
   /// Returns true if the operation was registered with a particular trait, e.g.
@@ -568,7 +568,7 @@ public:
   Attribute get(StringAttr name) const;
   Attribute get(StringRef name) const;
 
-  /// Return the specified named attribute if present, None otherwise.
+  /// Return the specified named attribute if present, std::nullopt otherwise.
   Optional<NamedAttribute> getNamed(StringRef name) const;
   Optional<NamedAttribute> getNamed(StringAttr name) const;
 

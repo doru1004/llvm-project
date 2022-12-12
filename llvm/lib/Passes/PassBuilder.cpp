@@ -24,8 +24,6 @@
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/CFGPrinter.h"
 #include "llvm/Analysis/CFGSCCPrinter.h"
-#include "llvm/Analysis/CFLAndersAliasAnalysis.h"
-#include "llvm/Analysis/CFLSteensAliasAnalysis.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallPrinter.h"
@@ -834,6 +832,19 @@ Expected<GVNOptions> parseGVNOptions(StringRef Params) {
     }
   }
   return Result;
+}
+
+Expected<SROAOptions> parseSROAOptions(StringRef Params) {
+  if (Params.empty() || Params == "modify-cfg")
+    return SROAOptions::ModifyCFG;
+  if (Params == "preserve-cfg")
+    return SROAOptions::PreserveCFG;
+  return make_error<StringError>(
+      formatv("invalid SROA pass parameter '{0}' (either preserve-cfg or "
+              "modify-cfg can be specified)",
+              Params)
+          .str(),
+      inconvertibleErrorCode());
 }
 
 Expected<StackLifetime::LivenessType>
