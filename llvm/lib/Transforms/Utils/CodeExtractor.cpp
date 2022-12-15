@@ -999,7 +999,7 @@ Function *CodeExtractor::constructFunction(const ValueSet &inputs,
 
     newFunction->addFnAttr(Attr);
   }
-  newFunction->getBasicBlockList().push_back(newRootNode);
+  newFunction->insert(newFunction->end(), newRootNode);
 
   // Create scalar and aggregate iterators to name all of the arguments we
   // inserted.
@@ -1208,7 +1208,7 @@ CallInst *CodeExtractor::emitCallAndSwitchStatement(Function *newFunction,
         Idx[1] = ConstantInt::get(Type::getInt32Ty(Context), i);
         GetElementPtrInst *GEP = GetElementPtrInst::Create(
             StructArgTy, Struct, Idx, "gep_" + StructValues[i]->getName());
-        codeReplacer->getInstList().push_back(GEP);
+        GEP->insertInto(codeReplacer, codeReplacer->end());
         new StoreInst(StructValues[i], GEP, codeReplacer);
         NumAggregatedInputs++;
       }
@@ -1226,7 +1226,7 @@ CallInst *CodeExtractor::emitCallAndSwitchStatement(Function *newFunction,
     if (auto DL = newFunction->getEntryBlock().getTerminator()->getDebugLoc())
       call->setDebugLoc(DL);
   }
-  codeReplacer->getInstList().push_back(call);
+  call->insertInto(codeReplacer, codeReplacer->end());
 
   // Set swifterror parameter attributes.
   for (unsigned SwiftErrArgNo : SwiftErrorArgs) {
@@ -1246,7 +1246,7 @@ CallInst *CodeExtractor::emitCallAndSwitchStatement(Function *newFunction,
       Idx[1] = ConstantInt::get(Type::getInt32Ty(Context), aggIdx);
       GetElementPtrInst *GEP = GetElementPtrInst::Create(
           StructArgTy, Struct, Idx, "gep_reload_" + outputs[i]->getName());
-      codeReplacer->getInstList().push_back(GEP);
+      GEP->insertInto(codeReplacer, codeReplacer->end());
       Output = GEP;
       ++aggIdx;
     } else {
@@ -1435,21 +1435,17 @@ CallInst *CodeExtractor::emitCallAndSwitchStatement(Function *newFunction,
 }
 
 void CodeExtractor::moveCodeToFunction(Function *newFunction) {
-  Function *oldFunc = (*Blocks.begin())->getParent();
-  Function::BasicBlockListType &oldBlocks = oldFunc->getBasicBlockList();
-  Function::BasicBlockListType &newBlocks = newFunction->getBasicBlockList();
-
   auto newFuncIt = newFunction->front().getIterator();
   for (BasicBlock *Block : Blocks) {
     // Delete the basic block from the old function, and the list of blocks
-    oldBlocks.remove(Block);
+    Block->removeFromParent();
 
     // Insert this basic block into the new function
     // Insert the original blocks after the entry block created
     // for the new function. The entry block may be followed
     // by a set of exit blocks at this point, but these exit
     // blocks better be placed at the end of the new function.
-    newFuncIt = newBlocks.insertAfter(newFuncIt, Block);
+    newFuncIt = newFunction->insert(std::next(newFuncIt), Block);
   }
 }
 
@@ -1562,13 +1558,19 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
     if (!DII)
       continue;
 
-    // Point the intrinsic to a fresh label within the new function.
+    // Point the intrinsic to a fresh label within the new function if the
+    // intrinsic was not inlined from some other function.
     if (auto *DLI = dyn_cast<DbgLabelInst>(&I)) {
+      if (DLI->getDebugLoc().getInlinedAt())
+        continue;
       DILabel *OldLabel = DLI->getLabel();
       DINode *&NewLabel = RemappedMetadata[OldLabel];
-      if (!NewLabel)
-        NewLabel = DILabel::get(Ctx, NewSP, OldLabel->getName(),
+      if (!NewLabel) {
+        DILocalScope *NewScope = DILocalScope::cloneScopeForSubprogram(
+            *OldLabel->getScope(), *NewSP, Ctx, Cache);
+        NewLabel = DILabel::get(Ctx, NewScope, OldLabel->getName(),
                                 OldLabel->getFile(), OldLabel->getLine());
+      }
       DLI->setArgOperand(0, MetadataAsValue::get(Ctx, NewLabel));
       continue;
     }
@@ -1618,10 +1620,9 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
           DebugLoc::replaceInlinedAtSubprogram(DL, *NewSP, Ctx, Cache));
 
     // Loop info metadata may contain line locations. Fix them up.
-    auto updateLoopInfoLoc = [&Ctx, NewSP](Metadata *MD) -> Metadata * {
+    auto updateLoopInfoLoc = [&Ctx, &Cache, NewSP](Metadata *MD) -> Metadata * {
       if (auto *Loc = dyn_cast_or_null<DILocation>(MD))
-        return DILocation::get(Ctx, Loc->getLine(), Loc->getColumn(), NewSP,
-                               nullptr);
+        return DebugLoc::replaceInlinedAtSubprogram(Loc, *NewSP, Ctx, Cache);
       return MD;
     };
     updateLoopMetadataDebugLocations(I, updateLoopInfoLoc);
@@ -1734,7 +1735,7 @@ CodeExtractor::extractCodeRegion(const CodeExtractorAnalysisCache &CEAC,
       });
     });
   }
-  newFuncRoot->getInstList().push_back(BranchI);
+  BranchI->insertInto(newFuncRoot, newFuncRoot->end());
 
   ValueSet SinkingCands, HoistingCands;
   BasicBlock *CommonExit = nullptr;

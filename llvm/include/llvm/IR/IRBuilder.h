@@ -65,7 +65,8 @@ public:
   virtual void InsertHelper(Instruction *I, const Twine &Name,
                             BasicBlock *BB,
                             BasicBlock::iterator InsertPt) const {
-    if (BB) BB->getInstList().insert(InsertPt, I);
+    if (BB)
+      I->insertInto(BB, InsertPt);
     I->setName(Name);
   }
 };
@@ -1542,6 +1543,7 @@ public:
       return CreateConstrainedFPBinOp(Intrinsic::experimental_constrained_fdiv,
                                       L, R, FMFSource, Name);
 
+    FastMathFlags FMF = FMFSource->getFastMathFlags();
     if (Value *V = Folder.FoldBinOpFMF(Instruction::FDiv, L, R, FMF))
       return V;
     Instruction *I = setFPAttrs(BinaryOperator::CreateFDiv(L, R), nullptr, FMF);

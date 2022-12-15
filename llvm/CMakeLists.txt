@@ -857,17 +857,8 @@ else()
   endif()
 endif()
 
-set(LLVM_DEFAULT_TARGET_TRIPLE "${LLVM_DEFAULT_TARGET_TRIPLE_default}" CACHE STRING
-  "Default target for which LLVM will generate code." )
-if (TARGET_TRIPLE)
-  message(WARNING "TARGET_TRIPLE is deprecated and will be removed in a future release. "
-                  "Please use LLVM_DEFAULT_TARGET_TRIPLE instead.")
-  set(LLVM_TARGET_TRIPLE "${TARGET_TRIPLE}")
-else()
-  set(LLVM_TARGET_TRIPLE "${LLVM_DEFAULT_TARGET_TRIPLE}")
-endif()
-message(STATUS "LLVM host triple: ${LLVM_HOST_TRIPLE}")
-message(STATUS "LLVM default target triple: ${LLVM_DEFAULT_TARGET_TRIPLE}")
+include(SetTargetTriple)
+set_llvm_target_triple()
 
 if(WIN32 OR CYGWIN)
   if(BUILD_SHARED_LIBS OR LLVM_BUILD_LLVM_DYLIB)
@@ -980,7 +971,6 @@ endif()
 
 # For up-to-date instructions for installing the TFLite dependency, refer to
 # the bot setup script: https://github.com/google/ml-compiler-opt/blob/main/buildbot/buildbot_init.sh
-set(TENSORFLOW_C_LIB_PATH "" CACHE PATH "Path to TensorFlow C library install")
 set(LLVM_HAVE_TFLITE "" CACHE BOOL "Use tflite")
 if (LLVM_HAVE_TFLITE)
   find_package(protobuf REQUIRED)
@@ -988,28 +978,6 @@ if (LLVM_HAVE_TFLITE)
   set(LLVM_HAVE_TF_API "ON" CACHE BOOL "Full Tensorflow API available")
   set(LLVM_PROTOBUF_OUT_DIR ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/protobuf_gen)
   include_directories(${LLVM_PROTOBUF_OUT_DIR})
-elseif (TENSORFLOW_C_LIB_PATH)
-  find_library(tensorflow_c_api tensorflow PATHS ${TENSORFLOW_C_LIB_PATH}/lib NO_DEFAULT_PATH REQUIRED)
-  # Currently, the protobuf headers are distributed with the pip package that corresponds to the version
-  # of the C API library.
-  find_library(tensorflow_fx tensorflow_framework PATHS ${TENSORFLOW_C_LIB_PATH}/lib NO_DEFAULT_PATH REQUIRED)
-  set(LLVM_HAVE_TF_API "ON" CACHE BOOL "Full Tensorflow API available")
-  include_directories(${TENSORFLOW_C_LIB_PATH}/include)
-  if (NOT TF_PROTO_HEADERS)
-    message(STATUS "TF_PROTO_HEADERS not defined. Looking for tensorflow pip package.")
-    execute_process(COMMAND
-      ${Python3_EXECUTABLE} "-c" "import tensorflow as tf; import os; print(os.path.dirname(tf.__file__))"
-      OUTPUT_VARIABLE TF_PIP)
-    if ("${TF_PIP}" STREQUAL "")
-      message(FATAL ERROR "Tensorflow pip package is also required for 'development' mode (protobuf headers)")
-    endif()
-    string(STRIP ${TF_PIP} TF_PIP)
-    set(TF_PROTO_HEADERS "${TF_PIP}/include")
-  endif()
-  message(STATUS "Using Tensorflow headers under: ${TF_PROTO_HEADERS}")
-  include_directories(${TF_PROTO_HEADERS})
-  add_definitions("-DGOOGLE_PROTOBUF_NO_RTTI")
-  add_definitions("-D_GLIBCXX_USE_CXX11_ABI=0")
 endif()
 
 # For up-to-date instructions for installing the Tensorflow dependency, refer to

@@ -827,11 +827,14 @@ void MergeFunctions::mergeTwoFunctions(Function *F, Function *G) {
     removeUsers(F);
     F->replaceAllUsesWith(NewF);
 
+    // We collect alignment before writeThunkOrAlias that overwrites NewF and
+    // G's content.
+    const MaybeAlign NewFAlign = NewF->getAlign();
+    const MaybeAlign GAlign = G->getAlign();
+
     writeThunkOrAlias(F, G);
     writeThunkOrAlias(F, NewF);
 
-    const MaybeAlign NewFAlign = NewF->getAlign();
-    const MaybeAlign GAlign = G->getAlign();
     if (NewFAlign || GAlign)
       F->setAlignment(std::max(NewFAlign.valueOrOne(), GAlign.valueOrOne()));
     else

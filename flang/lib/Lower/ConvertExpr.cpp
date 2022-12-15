@@ -1872,6 +1872,8 @@ public:
   mlir::Type genType(const Fortran::evaluate::DynamicType &dt) {
     if (dt.category() != Fortran::common::TypeCategory::Derived)
       return converter.genType(dt.category(), dt.kind());
+    if (dt.IsUnlimitedPolymorphic())
+      return mlir::NoneType::get(&converter.getMLIRContext());
     return converter.genType(dt.GetDerivedTypeSpec());
   }
 
@@ -4373,8 +4375,7 @@ private:
     llvm::SmallVector<mlir::Value> idxShape;
     for (auto s : shape)
       idxShape.push_back(builder.createConvert(loc, idxTy, s));
-    auto shapeTy = fir::ShapeType::get(builder.getContext(), idxShape.size());
-    return builder.create<fir::ShapeOp>(loc, shapeTy, idxShape);
+    return builder.create<fir::ShapeOp>(loc, idxShape);
   }
 
   fir::ShapeOp genShapeOp(llvm::ArrayRef<mlir::Value> shape) {
@@ -5639,6 +5640,13 @@ private:
                                        builder.getContext(), charTy.getFKind()),
                                    seqTy.getDimension()));
       }
+      llvm::SmallVector<mlir::Value> lbounds;
+      llvm::SmallVector<mlir::Value> nonDeferredLenParams;
+      if (!slice) {
+        lbounds =
+            fir::factory::getNonDefaultLowerBounds(builder, loc, extMemref);
+        nonDeferredLenParams = fir::factory::getNonDeferredLenParams(extMemref);
+      }
       mlir::Value embox =
           memref.getType().isa<fir::BaseBoxType>()
               ? builder.create<fir::ReboxOp>(loc, boxTy, memref, shape, slice)
@@ -5647,7 +5655,9 @@ private:
                     .create<fir::EmboxOp>(loc, boxTy, memref, shape, slice,
                                           fir::getTypeParams(extMemref))
                     .getResult();
-      return [=](IterSpace) -> ExtValue { return fir::BoxValue(embox); };
+      return [=](IterSpace) -> ExtValue {
+        return fir::BoxValue(embox, lbounds, nonDeferredLenParams);
+      };
     }
     auto eleTy = arrTy.cast<fir::SequenceType>().getEleTy();
     if (isReferentiallyOpaque()) {

@@ -17,7 +17,9 @@
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributeInterfaces.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Matchers.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/Interfaces/DestinationStyleOpInterface.h"
 #include "mlir/Support/MathExtras.h"
@@ -517,8 +519,7 @@ void EmptyOp::build(OpBuilder &builder, OperationState &result,
                     Attribute encoding) {
   SmallVector<int64_t> staticShape;
   SmallVector<Value> dynamicSizes;
-  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticShape,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticShape);
   build(builder, result, staticShape, elementType, dynamicSizes, encoding);
 }
 
@@ -1573,12 +1574,9 @@ RankedTensorType ExtractSliceOp::inferResultType(
     ArrayRef<OpFoldResult> sizes, ArrayRef<OpFoldResult> strides) {
   SmallVector<int64_t> staticOffsets, staticSizes, staticStrides;
   SmallVector<Value> dynamicOffsets, dynamicSizes, dynamicStrides;
-  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets);
+  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes);
+  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides);
   return ExtractSliceOp::inferResultType(sourceShapedTensorType, staticOffsets,
                                          staticSizes, staticStrides);
 }
@@ -1621,12 +1619,9 @@ RankedTensorType ExtractSliceOp::inferCanonicalRankReducedResultType(
     ArrayRef<OpFoldResult> strides) {
   SmallVector<int64_t> staticOffsets, staticSizes, staticStrides;
   SmallVector<Value> dynamicOffsets, dynamicSizes, dynamicStrides;
-  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets);
+  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes);
+  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides);
   return ExtractSliceOp::inferCanonicalRankReducedResultType(
       desiredResultRank, sourceRankedTensorType, staticOffsets, staticSizes,
       staticStrides);
@@ -1642,12 +1637,9 @@ void ExtractSliceOp::build(OpBuilder &b, OperationState &result,
                            ArrayRef<NamedAttribute> attrs) {
   SmallVector<int64_t> staticOffsets, staticSizes, staticStrides;
   SmallVector<Value> dynamicOffsets, dynamicSizes, dynamicStrides;
-  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets);
+  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes);
+  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides);
   auto sourceRankedTensorType = source.getType().cast<RankedTensorType>();
   // Structuring implementation this way avoids duplication between builders.
   if (!resultType) {
@@ -1752,6 +1744,23 @@ llvm::SmallBitVector ExtractSliceOp::getDroppedDims() {
     droppedDims.set(size.index());
   }
   return droppedDims;
+}
+
+FailureOr<Value>
+ExtractSliceOp::rankReduceIfNeeded(OpBuilder &b, Location loc, Value value,
+                                   ArrayRef<int64_t> desiredShape) {
+  auto sourceTensorType = value.getType().dyn_cast<RankedTensorType>();
+  assert(sourceTensorType && "not a ranked tensor type");
+  auto sourceShape = sourceTensorType.getShape();
+  if (sourceShape.equals(desiredShape))
+    return value;
+  auto maybeRankReductionMask =
+      mlir::computeRankReductionMask(sourceShape, desiredShape);
+  if (!maybeRankReductionMask)
+    return failure();
+  return createCanonicalRankReducingExtractSliceOp(
+      b, loc, value,
+      RankedTensorType::Builder(sourceTensorType).setShape(desiredShape));
 }
 
 LogicalResult ExtractSliceOp::reifyResultShapes(
@@ -2062,12 +2071,9 @@ void InsertSliceOp::build(OpBuilder &b, OperationState &result, Value source,
                           ArrayRef<NamedAttribute> attrs) {
   SmallVector<int64_t> staticOffsets, staticSizes, staticStrides;
   SmallVector<Value> dynamicOffsets, dynamicSizes, dynamicStrides;
-  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets);
+  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes);
+  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides);
   build(b, result, dest.getType(), source, dest, dynamicOffsets, dynamicSizes,
         dynamicStrides, b.getDenseI64ArrayAttr(staticOffsets),
         b.getDenseI64ArrayAttr(staticSizes),
@@ -2375,7 +2381,6 @@ struct InsertSliceOpSourceCastInserter final
         insertSliceOp, cast, insertSliceOp.getDest(),
         insertSliceOp.getMixedOffsets(), insertSliceOp.getMixedSizes(),
         insertSliceOp.getMixedStrides());
-    cast.getDefiningOp()->getParentOfType<ModuleOp>().dump();
     return success();
   }
 };
@@ -2475,8 +2480,7 @@ RankedTensorType PadOp::inferResultType(RankedTensorType sourceType,
 
   SmallVector<int64_t, 4> inferredShape;
   for (auto i : llvm::seq<unsigned>(0, rank)) {
-    if (sourceType.isDynamicDim(i) ||
-        staticLow[i] == ShapedType::kDynamic ||
+    if (sourceType.isDynamicDim(i) || staticLow[i] == ShapedType::kDynamic ||
         staticHigh[i] == ShapedType::kDynamic) {
       inferredShape.push_back(resultShape.empty() ? ShapedType::kDynamic
                                                   : resultShape[i]);
@@ -2525,10 +2529,8 @@ void PadOp::build(OpBuilder &b, OperationState &result, Type resultType,
   // This will grow staticLow and staticHigh with 1 value. If the config is
   // dynamic (ie not a constant), dynamicLow and dynamicHigh will grow with 1
   // value as well.
-  dispatchIndexOpFoldResults(low, dynamicLow, staticLow,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(high, dynamicHigh, staticHigh,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(low, dynamicLow, staticLow);
+  dispatchIndexOpFoldResults(high, dynamicHigh, staticHigh);
   if (!resultType) {
     resultType = PadOp::inferResultType(sourceType, staticLow, staticHigh);
   }
@@ -2875,12 +2877,9 @@ void ParallelInsertSliceOp::build(OpBuilder &b, OperationState &result,
                                   ArrayRef<NamedAttribute> attrs) {
   SmallVector<int64_t> staticOffsets, staticSizes, staticStrides;
   SmallVector<Value> dynamicOffsets, dynamicSizes, dynamicStrides;
-  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes,
-                             ShapedType::kDynamic);
-  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(offsets, dynamicOffsets, staticOffsets);
+  dispatchIndexOpFoldResults(sizes, dynamicSizes, staticSizes);
+  dispatchIndexOpFoldResults(strides, dynamicStrides, staticStrides);
   build(b, result, {}, source, dest, dynamicOffsets, dynamicSizes,
         dynamicStrides, b.getDenseI64ArrayAttr(staticOffsets),
         b.getDenseI64ArrayAttr(staticSizes),
@@ -3047,8 +3046,7 @@ static SmallVector<int64_t> getStaticTilesImpl(OpTy op) {
                 "applies to only pack or unpack operations");
   SmallVector<Value> dynamicTiles;
   SmallVector<int64_t> staticTiles;
-  dispatchIndexOpFoldResults(op.getMixedTiles(), dynamicTiles, staticTiles,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(op.getMixedTiles(), dynamicTiles, staticTiles);
   return staticTiles;
 }
 
@@ -3195,8 +3193,7 @@ void PackOp::build(OpBuilder &builder, OperationState &state, Value source,
          "original dimensions to be tiled");
   SmallVector<int64_t> staticTileSizes;
   SmallVector<Value> dynamicTileSizes;
-  dispatchIndexOpFoldResults(innerTiles, dynamicTileSizes, staticTileSizes,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(innerTiles, dynamicTileSizes, staticTileSizes);
   build(builder, state, dest.getType(), source, dest,
         paddingValue ? paddingValue.value() : nullptr,
         outerDimsPerm.empty() ? nullptr
@@ -3404,8 +3401,7 @@ void UnPackOp::build(OpBuilder &builder, OperationState &state, Value source,
          "original dimensions to be tiled");
   SmallVector<int64_t> staticTileSizes;
   SmallVector<Value> dynamicTileSizes;
-  dispatchIndexOpFoldResults(innerTiles, dynamicTileSizes, staticTileSizes,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(innerTiles, dynamicTileSizes, staticTileSizes);
   build(builder, state, dest.getType(), source, dest,
         outerDimsPerm.empty() ? nullptr
                               : builder.getDenseI64ArrayAttr(outerDimsPerm),
