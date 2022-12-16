@@ -209,7 +209,11 @@ const semantics::DerivedTypeSpec *GetDerivedTypeSpec(const DynamicType &type) {
 static const semantics::Symbol *FindParentComponent(
     const semantics::DerivedTypeSpec &derived) {
   const semantics::Symbol &typeSymbol{derived.typeSymbol()};
-  if (const semantics::Scope * scope{typeSymbol.scope()}) {
+  const semantics::Scope *scope{derived.scope()};
+  if (!scope) {
+    scope = typeSymbol.scope();
+  }
+  if (scope) {
     const auto &dtDetails{typeSymbol.get<semantics::DerivedTypeDetails>()};
     if (auto extends{dtDetails.GetParentComponentName()}) {
       if (auto iter{scope->find(*extends)}; iter != scope->cend()) {
@@ -354,10 +358,11 @@ bool DynamicType::IsTkLenCompatibleWith(const DynamicType &that) const {
 std::optional<bool> DynamicType::SameTypeAs(const DynamicType &that) const {
   bool x{AreCompatibleTypes(*this, that, true, true)};
   bool y{AreCompatibleTypes(that, *this, true, true)};
-  if (x == y) {
-    return x;
+  if (!x && !y) {
+    return false;
+  } else if (x && y && !IsPolymorphic() && !that.IsPolymorphic()) {
+    return true;
   } else {
-    // If either is unlimited polymorphic, the result is unknown.
     return std::nullopt;
   }
 }
