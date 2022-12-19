@@ -4943,7 +4943,7 @@ public:
         std::optional<const SCEV *> Res =
             compareWithBackedgeCondition(SI->getCondition());
         if (Res) {
-          bool IsOne = cast<SCEVConstant>(Res.value())->getValue()->isOne();
+          bool IsOne = cast<SCEVConstant>(*Res)->getValue()->isOne();
           Result = SE.getSCEV(IsOne ? SI->getTrueValue() : SI->getFalseValue());
         }
         break;
@@ -4951,7 +4951,7 @@ public:
       default: {
         std::optional<const SCEV *> Res = compareWithBackedgeCondition(I);
         if (Res)
-          Result = Res.value();
+          Result = *Res;
         break;
       }
       }
@@ -6778,7 +6778,7 @@ const ConstantRange &ScalarEvolution::getRangeRef(
     std::optional<ConstantRange> MDRange = GetRangeFromMetadata(U->getValue());
     if (MDRange)
       ConservativeResult =
-          ConservativeResult.intersectWith(MDRange.value(), RangeType);
+          ConservativeResult.intersectWith(*MDRange, RangeType);
 
     // Use facts about recurrences in the underlying IR.  Note that add
     // recurrences are AddRecExprs and thus don't hit this path.  This
@@ -7294,8 +7294,9 @@ bool ScalarEvolution::isAddRecNeverPoison(const Instruction *I, const Loop *L) {
   while (!PoisonStack.empty() && !LatchControlDependentOnPoison) {
     const Instruction *Poison = PoisonStack.pop_back_val();
 
-    for (const auto *PoisonUser : Poison->users()) {
-      if (propagatesPoison(cast<Operator>(PoisonUser))) {
+    for (const Use &U : Poison->uses()) {
+      const User *PoisonUser = U.getUser();
+      if (propagatesPoison(U)) {
         if (Pushed.insert(cast<Instruction>(PoisonUser)).second)
           PoisonStack.push_back(cast<Instruction>(PoisonUser));
       } else if (auto *BI = dyn_cast<BranchInst>(PoisonUser)) {
@@ -10903,8 +10904,7 @@ ScalarEvolution::getMonotonicPredicateType(const SCEVAddRecExpr *LHS,
     auto ResultSwapped =
         getMonotonicPredicateTypeImpl(LHS, ICmpInst::getSwappedPredicate(Pred));
 
-    assert(ResultSwapped && "should be able to analyze both!");
-    assert(ResultSwapped.value() != Result.value() &&
+    assert(*ResultSwapped != *Result &&
            "monotonicity should flip as we flip the predicate");
   }
 #endif

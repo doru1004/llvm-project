@@ -740,7 +740,7 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
 
   setOperationAction(ISD::PREFETCH, MVT::Other, Custom);
 
-  setOperationAction(ISD::FLT_ROUNDS_, MVT::i32, Custom);
+  setOperationAction(ISD::GET_ROUNDING, MVT::i32, Custom);
   setOperationAction(ISD::SET_ROUNDING, MVT::Other, Custom);
 
   setOperationAction(ISD::ATOMIC_CMP_SWAP, MVT::i128, Custom);
@@ -4468,8 +4468,8 @@ static bool isAddSubZExt(SDNode *N, SelectionDAG &DAG) {
   return false;
 }
 
-SDValue AArch64TargetLowering::LowerFLT_ROUNDS_(SDValue Op,
-                                                SelectionDAG &DAG) const {
+SDValue AArch64TargetLowering::LowerGET_ROUNDING(SDValue Op,
+                                                 SelectionDAG &DAG) const {
   // The rounding mode is in bits 23:22 of the FPSCR.
   // The ARM rounding mode value to FLT_ROUNDS mapping is 0->1, 1->2, 2->3, 3->0
   // The formula we use to implement this is (((FPSCR + 1 << 22) >> 22) & 3)
@@ -4645,6 +4645,45 @@ static inline SDValue getPTrue(SelectionDAG &DAG, SDLoc DL, EVT VT,
     return DAG.getConstant(1, DL, MVT::nxv1i1);
   return DAG.getNode(AArch64ISD::PTRUE, DL, VT,
                      DAG.getTargetConstant(Pattern, DL, MVT::i32));
+}
+
+static SDValue optimizeWhile(SDValue Op, SelectionDAG &DAG, bool IsSigned,
+                             bool IsLess, bool IsEqual) {
+  if (!isa<ConstantSDNode>(Op.getOperand(1)) ||
+      !isa<ConstantSDNode>(Op.getOperand(2)))
+    return SDValue();
+
+  SDLoc dl(Op);
+  APInt X = Op.getConstantOperandAPInt(1);
+  APInt Y = Op.getConstantOperandAPInt(2);
+  APInt NumActiveElems;
+  bool Overflow;
+  if (IsLess)
+    NumActiveElems = IsSigned ? Y.ssub_ov(X, Overflow) : Y.usub_ov(X, Overflow);
+  else
+    NumActiveElems = IsSigned ? X.ssub_ov(Y, Overflow) : X.usub_ov(Y, Overflow);
+
+  if (Overflow)
+    return SDValue();
+
+  if (IsEqual) {
+    APInt One(NumActiveElems.getBitWidth(), 1, IsSigned);
+    NumActiveElems = IsSigned ? NumActiveElems.sadd_ov(One, Overflow)
+                              : NumActiveElems.uadd_ov(One, Overflow);
+    if (Overflow)
+      return SDValue();
+  }
+
+  std::optional<unsigned> PredPattern =
+      getSVEPredPatternFromNumElements(NumActiveElems.getZExtValue());
+  unsigned MinSVEVectorSize = std::max(
+      DAG.getSubtarget<AArch64Subtarget>().getMinSVEVectorSizeInBits(), 128u);
+  unsigned ElementSize = 128 / Op.getValueType().getVectorMinNumElements();
+  if (PredPattern != std::nullopt &&
+      NumActiveElems.getZExtValue() <= (MinSVEVectorSize / ElementSize))
+    return getPTrue(DAG, dl, Op.getValueType(), *PredPattern);
+
+  return SDValue();
 }
 
 // Returns a safe bitcast between two scalable vector predicates, where
@@ -4899,22 +4938,30 @@ SDValue AArch64TargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
                                                  Op.getOperand(1))));
     return SDValue();
   }
-  case Intrinsic::aarch64_sve_whilelo: {
-    if (isa<ConstantSDNode>(Op.getOperand(1)) &&
-        isa<ConstantSDNode>(Op.getOperand(2))) {
-      unsigned MinSVEVectorSize =
-          std::max(Subtarget->getMinSVEVectorSizeInBits(), 128u);
-      unsigned ElementSize = 128 / Op.getValueType().getVectorMinNumElements();
-      unsigned NumActiveElems =
-          Op.getConstantOperandVal(2) - Op.getConstantOperandVal(1);
-      std::optional<unsigned> PredPattern =
-          getSVEPredPatternFromNumElements(NumActiveElems);
-      if ((PredPattern != std::nullopt) &&
-          NumActiveElems <= (MinSVEVectorSize / ElementSize))
-        return getPTrue(DAG, dl, Op.getValueType(), *PredPattern);
-    }
-    return SDValue();
-  }
+  case Intrinsic::aarch64_sve_whilelo:
+    return optimizeWhile(Op, DAG, /*IsSigned=*/false, /*IsLess=*/true,
+                         /*IsEqual=*/false);
+  case Intrinsic::aarch64_sve_whilelt:
+    return optimizeWhile(Op, DAG, /*IsSigned=*/true, /*IsLess=*/true,
+                         /*IsEqual=*/false);
+  case Intrinsic::aarch64_sve_whilels:
+    return optimizeWhile(Op, DAG, /*IsSigned=*/false, /*IsLess=*/true,
+                         /*IsEqual=*/true);
+  case Intrinsic::aarch64_sve_whilele:
+    return optimizeWhile(Op, DAG, /*IsSigned=*/true, /*IsLess=*/true,
+                         /*IsEqual=*/true);
+  case Intrinsic::aarch64_sve_whilege:
+    return optimizeWhile(Op, DAG, /*IsSigned=*/true, /*IsLess=*/false,
+                         /*IsEqual=*/true);
+  case Intrinsic::aarch64_sve_whilegt:
+    return optimizeWhile(Op, DAG, /*IsSigned=*/true, /*IsLess=*/false,
+                         /*IsEqual=*/false);
+  case Intrinsic::aarch64_sve_whilehs:
+    return optimizeWhile(Op, DAG, /*IsSigned=*/false, /*IsLess=*/false,
+                         /*IsEqual=*/true);
+  case Intrinsic::aarch64_sve_whilehi:
+    return optimizeWhile(Op, DAG, /*IsSigned=*/false, /*IsLess=*/false,
+                         /*IsEqual=*/false);
   case Intrinsic::aarch64_sve_sunpkhi:
     return DAG.getNode(AArch64ISD::SUNPKHI, dl, Op.getValueType(),
                        Op.getOperand(1));
@@ -5887,8 +5934,8 @@ SDValue AArch64TargetLowering::LowerOperation(SDValue Op,
     return LowerFP_TO_INT_SAT(Op, DAG);
   case ISD::FSINCOS:
     return LowerFSINCOS(Op, DAG);
-  case ISD::FLT_ROUNDS_:
-    return LowerFLT_ROUNDS_(Op, DAG);
+  case ISD::GET_ROUNDING:
+    return LowerGET_ROUNDING(Op, DAG);
   case ISD::SET_ROUNDING:
     return LowerSET_ROUNDING(Op, DAG);
   case ISD::MUL:

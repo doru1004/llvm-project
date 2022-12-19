@@ -99,7 +99,7 @@ private:
     else
       resultType = fir::ReferenceType::get(resultValueType);
 
-    llvm::Optional<bool> complexPart;
+    std::optional<bool> complexPart;
     llvm::SmallVector<mlir::Value> substring;
     auto designate = getBuilder().create<hlfir::DesignateOp>(
         getLoc(), resultType, partInfo.base.getBase(), "",
@@ -457,9 +457,9 @@ struct BinaryOp<Fortran::evaluate::Relational<
     auto cmp = fir::runtime::genCharCompare(
         builder, loc, translateRelational(op.opr), lhsExv, rhsExv);
     if (lhsCleanUp)
-      lhsCleanUp.value()();
+      (*lhsCleanUp)();
     if (rhsCleanUp)
-      rhsCleanUp.value()();
+      (*rhsCleanUp)();
     return hlfir::EntityWithAttributes{cmp};
   }
 };
@@ -511,13 +511,15 @@ template <int KIND>
 struct BinaryOp<Fortran::evaluate::SetLength<KIND>> {
   using Op = Fortran::evaluate::SetLength<KIND>;
   static hlfir::EntityWithAttributes gen(mlir::Location loc,
-                                         fir::FirOpBuilder &, const Op &,
-                                         hlfir::Entity, hlfir::Entity) {
-    TODO(loc, "SetLength lowering to HLFIR");
+                                         fir::FirOpBuilder &builder, const Op &,
+                                         hlfir::Entity string,
+                                         hlfir::Entity length) {
+    return hlfir::EntityWithAttributes{
+        builder.create<hlfir::SetLengthOp>(loc, string, length)};
   }
   static void
-  genResultTypeParams(mlir::Location loc, fir::FirOpBuilder &builder,
-                      hlfir::Entity lhs, hlfir::Entity rhs,
+  genResultTypeParams(mlir::Location, fir::FirOpBuilder &, hlfir::Entity,
+                      hlfir::Entity rhs,
                       llvm::SmallVectorImpl<mlir::Value> &resultTypeParams) {
     resultTypeParams.push_back(rhs);
   }
@@ -718,10 +720,8 @@ private:
   gen(const Fortran::evaluate::FunctionRef<T> &expr) {
     mlir::Type resType =
         Fortran::lower::TypeBuilder<T>::genType(getConverter(), expr);
-    return Fortran::lower::convertCallToHLFIR(getLoc(), getConverter(), expr,
-                                              resType, getSymMap(),
-                                              getStmtCtx())
-        .value();
+    return *Fortran::lower::convertCallToHLFIR(
+        getLoc(), getConverter(), expr, resType, getSymMap(), getStmtCtx());
   }
 
   template <typename T>
@@ -885,7 +885,7 @@ HlfirDesignatorBuilder::genSubscript(const Fortran::evaluate::Expr<T> &expr) {
     // IR harder to read: directly use index constants for constant subscripts.
     mlir::Type idxTy = builder.getIndexType();
     if (loweredExpr.getType() != idxTy)
-      if (auto cstIndex = fir::factory::getIntIfConstant(loweredExpr))
+      if (auto cstIndex = fir::getIntIfConstant(loweredExpr))
         return hlfir::EntityWithAttributes{
             builder.createIntegerConstant(getLoc(), idxTy, *cstIndex)};
   }
