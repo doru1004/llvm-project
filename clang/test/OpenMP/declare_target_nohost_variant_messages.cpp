@@ -1,3 +1,5 @@
+// REQUIRES: amdgpu-registered-target
+
 // RUN: %clang_cc1 -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -fopenmp-version=52 -DVERBOSE_MODE=1 -verify=omp52 -fnoopenmp-use-tls -ferror-limit 100 -fopenmp-targets=amdgcn-amd-amdhsa -o - %s
 
 void fun();

@@ -11,7 +11,7 @@
 // RUN: %clang_cc1 -triple x86_64-apple-macos10.7.0 -verify=expected,omp51 -fopenmp-version=51 -fopenmp-simd -fnoopenmp-use-tls -ferror-limit 100 -o - %s
 // RUN: %clang_cc1 -triple x86_64-apple-macos10.7.0 -verify=expected,omp51 -fopenmp-version=51 -fopenmp-simd -fnoopenmp-use-tls -ferror-limit 100 -o - %s
 
-// RUN: %clang_cc1 -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -fopenmp-version=52 -DVERBOSE_MODE=1 -verify=expected,omp52 -fnoopenmp-use-tls -ferror-limit 100 -o - %s
+// RUN: %clang_cc1 -fopenmp -fopenmp-targets=x86_64-apple-macos10.7.0 -fopenmp-version=52 -DVERBOSE_MODE=1 -verify=expected,omp52 -fnoopenmp-use-tls -ferror-limit 100 -o - %s
 
 // RUN: %clang_cc1 -triple x86_64-apple-macos10.7.0 -verify=expected,omp5 -fopenmp -fnoopenmp-use-tls -ferror-limit 100 -o - %s
 #pragma omp end declare target // expected-error {{unexpected OpenMP directive '#pragma omp end declare target'}}
