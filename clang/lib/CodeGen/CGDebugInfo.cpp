@@ -578,8 +578,8 @@ void CGDebugInfo::CreateCompileUnit() {
     LangTag = llvm::dwarf::DW_LANG_OpenCL;
   } else if (LO.RenderScript) {
     LangTag = llvm::dwarf::DW_LANG_GOOGLE_RenderScript;
-  } else if (LO.C11) {
-    LangTag = llvm::dwarf::DW_LANG_C11;
+  } else if (LO.C11 && !(CGO.DebugStrictDwarf && CGO.DwarfVersion < 5)) {
+      LangTag = llvm::dwarf::DW_LANG_C11;
   } else if (LO.C99) {
     LangTag = llvm::dwarf::DW_LANG_C99;
   } else {
@@ -2929,6 +2929,9 @@ llvm::DIType *CGDebugInfo::CreateTypeDefinition(const ObjCInterfaceType *Ty,
       Flags = llvm::DINode::FlagPrivate;
     else if (Field->getAccessControl() == ObjCIvarDecl::Public)
       Flags = llvm::DINode::FlagPublic;
+
+    if (Field->isBitField())
+      Flags |= llvm::DINode::FlagBitField;
 
     llvm::MDNode *PropertyNode = nullptr;
     if (ObjCImplementationDecl *ImpD = ID->getImplementation()) {

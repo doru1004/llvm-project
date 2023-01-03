@@ -2641,8 +2641,8 @@ static void CollectArgsForIntegratedAssembler(Compilation &C,
   }
   if (ImplicitIt.size())
     AddARMImplicitITArgs(Args, CmdArgs, ImplicitIt);
-  if (UseRelaxRelocations)
-    CmdArgs.push_back("--mrelax-relocations");
+  if (!UseRelaxRelocations)
+    CmdArgs.push_back("-mrelax-relocations=no");
   if (UseNoExecStack)
     CmdArgs.push_back("-mnoexecstack");
   if (MipsTargetFeature != nullptr) {
@@ -6361,9 +6361,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         Args.MakeArgString(Twine("-fcf-protection=") + A->getValue()));
   }
 
-  if (IsUsingLTO)
-    Args.AddLastArg(CmdArgs, options::OPT_mibt_seal);
-
   if (Arg *A = Args.getLastArg(options::OPT_mfunction_return_EQ))
     CmdArgs.push_back(
         Args.MakeArgString(Twine("-mfunction-return=") + A->getValue()));
@@ -7226,6 +7223,14 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
              getToolChain().IsAArch64OutlineAtomicsDefault(Args)) {
     CmdArgs.push_back("-target-feature");
     CmdArgs.push_back("+outline-atomics");
+  }
+
+  if (Triple.isAArch64() &&
+      (Args.hasArg(options::OPT_mno_fmv) ||
+       getToolChain().GetRuntimeLibType(Args) != ToolChain::RLT_CompilerRT)) {
+    // Disable Function Multiversioning on AArch64 target.
+    CmdArgs.push_back("-target-feature");
+    CmdArgs.push_back("-fmv");
   }
 
   if (Args.hasFlag(options::OPT_faddrsig, options::OPT_fno_addrsig,

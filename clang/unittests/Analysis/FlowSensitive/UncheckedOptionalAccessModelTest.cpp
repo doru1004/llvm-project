@@ -1273,7 +1273,6 @@ protected:
     ExpectDiagnosticsFor(SourceCode, ast_matchers::hasName("target"));
   }
 
-private:
   template <typename FuncDeclMatcher>
   void ExpectDiagnosticsFor(std::string SourceCode,
                             FuncDeclMatcher FuncMatcher) {
@@ -2939,6 +2938,55 @@ TEST_P(UncheckedOptionalAccessTest, StructuredBindingsFromTupleLikeType) {
   )");
 }
 
+TEST_P(UncheckedOptionalAccessTest, CtorInitializerNullopt) {
+  using namespace ast_matchers;
+  ExpectDiagnosticsFor(
+      R"(
+    #include "unchecked_optional_access_test.h"
+
+    struct Target {
+      Target(): opt($ns::nullopt) {
+        opt.value(); // [[unsafe]]
+      }
+      $ns::$optional<int> opt;
+    };
+  )",
+      cxxConstructorDecl(ofClass(hasName("Target"))));
+}
+
+TEST_P(UncheckedOptionalAccessTest, CtorInitializerValue) {
+  using namespace ast_matchers;
+  ExpectDiagnosticsFor(
+      R"(
+    #include "unchecked_optional_access_test.h"
+
+    struct Target {
+      Target(): opt(3) {
+        opt.value();
+      }
+      $ns::$optional<int> opt;
+    };
+  )",
+      cxxConstructorDecl(ofClass(hasName("Target"))));
+}
+
+// This is regression test, it shouldn't crash.
+TEST_P(UncheckedOptionalAccessTest, Bitfield) {
+  using namespace ast_matchers;
+  ExpectDiagnosticsFor(
+      R"(
+    #include "unchecked_optional_access_test.h"
+    struct Dst {
+      unsigned int n : 1;
+    };
+    void target() {
+      $ns::$optional<bool> v;
+      Dst d;
+      if (v.has_value())
+        d.n = v.value();
+    }
+  )");
+}
 // FIXME: Add support for:
 // - constructors (copy, move)
 // - assignment operators (default, copy, move)

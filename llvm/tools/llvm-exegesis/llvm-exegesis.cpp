@@ -47,10 +47,6 @@
 namespace llvm {
 namespace exegesis {
 
-static cl::OptionCategory Options("llvm-exegesis options");
-static cl::OptionCategory BenchmarkOptions("llvm-exegesis benchmark options");
-static cl::OptionCategory AnalysisOptions("llvm-exegesis analysis options");
-
 static cl::opt<int> OpcodeIndex(
     "opcode-index",
     cl::desc("opcode to measure, by index, or -1 to measure all opcodes"),
@@ -209,11 +205,11 @@ static cl::opt<std::string>
          cl::desc("Target a specific cpu type (-mcpu=help for details)"),
          cl::value_desc("cpu-name"), cl::cat(Options), cl::init("native"));
 
-static cl::opt<bool>
-    DumpObjectToDisk("dump-object-to-disk",
-                     cl::desc("dumps the generated benchmark object to disk "
-                              "and prints a message to access it"),
-                     cl::cat(BenchmarkOptions), cl::init(true));
+static cl::opt<bool> DumpObjectToDisk(
+    "dump-object-to-disk",
+    cl::desc("dumps the generated benchmark object to disk "
+             "and prints a message to access it (default = false)"),
+    cl::cat(BenchmarkOptions), cl::init(false));
 
 static ExitOnError ExitOnErr("llvm-exegesis error: ");
 

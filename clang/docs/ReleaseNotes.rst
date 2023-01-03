@@ -326,6 +326,11 @@ Bug Fixes
 - Fix bug where constant evaluation treated a pointer to member that points to
   a weak member as never being null. Such comparisons are now treated as
   non-constant.
+- Fix sanity check when value initializing an empty union so that it takes into
+  account anonymous structs which is a GNU extension. This fixes
+  `Issue 58800 <https://github.com/llvm/llvm-project/issues/58800>`_
+- Fix an issue that triggers a crash if we instantiate a hidden friend functions.
+  This fixes `Issue 54457 <https://github.com/llvm/llvm-project/issues/54457>`_
 
 Improvements to Clang's diagnostics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -775,8 +780,8 @@ X86 Support in Clang
 - Switch ``AVX512-BF16`` intrinsics types from ``short`` to ``__bf16``.
 - Add support for ``PREFETCHI`` instructions.
 - Support ISA of ``CMPCCXADD``.
-  * Support intrinsic of ``__cmpccxadd_epi32``.
-  * Support intrinsic of ``__cmpccxadd_epi64``.
+  * Support intrinsic of ``_cmpccxadd_epi32``.
+  * Support intrinsic of ``_cmpccxadd_epi64``.
 - Add support for ``RAO-INT`` instructions.
   * Support intrinsic of ``_aadd_i32/64``
   * Support intrinsic of ``_aand_i32/64``
@@ -800,6 +805,8 @@ X86 Support in Clang
 - ``-march=raptorlake`` and ``-march=meteorlake`` are now supported.
 - ``-march=sierraforest``, ``-march=graniterapids`` and ``-march=grandridge`` are now supported.
 - Lift _BitInt() supported max width from 128 to 8388608.
+- Support intrinsics of ``_mm(256)_reduce_(add|mul|or|and)_epi8/16``.
+- Support intrinsics of ``_mm(256)_reduce_(max|min)_ep[i|u]8/16``.
 
 WebAssembly Support in Clang
 ----------------------------
@@ -854,6 +861,7 @@ Build System Changes
 
 AST Matchers
 ------------
+- Add ``isInAnoymousNamespace`` matcher to match declarations in an anonymous namespace.
 
 clang-format
 ------------
@@ -861,6 +869,8 @@ clang-format
 - Add ``RequiresExpressionIndentation`` option for configuring the alignment of requires-expressions.
   The default value of this option is ``OuterScope``, which differs in behavior from clang-format 15.
   To match the default behavior of clang-format 15, use the ``Keyword`` value.
+- Add ``IntegerLiteralSeparator`` option for fixing integer literal separators
+  in C++, C#, Java, and JavaScript.
 
 clang-extdef-mapping
 --------------------

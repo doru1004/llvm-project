@@ -11,6 +11,7 @@
 #include "PluginInterface.h"
 #include "Debug.h"
 #include "GlobalHandler.h"
+#include "JIT.h"
 #include "elf_common.h"
 #include "omptarget.h"
 #include "omptargetplugin.h"
@@ -356,6 +357,27 @@ Error GenericDeviceTy::registerKernelOffloadEntry(
   return Plugin::success();
 }
 
+Error GenericDeviceTy::registerHostPinnedMemoryBuffer(const void *Buffer,
+                                                      size_t Size) {
+  std::lock_guard<std::shared_mutex> Lock(HostAllocationsMutex);
+
+  auto Res = HostAllocations.insert({Buffer, Size});
+  if (!Res.second)
+    return Plugin::error("Registering an already registered pinned buffer");
+
+  return Plugin::success();
+}
+
+Error GenericDeviceTy::unregisterHostPinnedMemoryBuffer(const void *Buffer) {
+  std::lock_guard<std::shared_mutex> Lock(HostAllocationsMutex);
+
+  size_t Erased = HostAllocations.erase(Buffer);
+  if (!Erased)
+    return Plugin::error("Cannot find a registered host pinned buffer");
+
+  return Plugin::success();
+}
+
 Error GenericDeviceTy::synchronize(__tgt_async_info *AsyncInfo) {
   if (!AsyncInfo || !AsyncInfo->Queue)
     return Plugin::error("Invalid async info queue");
@@ -391,14 +413,18 @@ Expected<void *> GenericDeviceTy::dataAlloc(int64_t Size, void *HostPtr,
       return Plugin::error("Failed to allocate from device allocator");
   }
 
-  // Sucessful and valid allocation.
-  if (Alloc)
-    return Alloc;
+  // Report error if the memory manager or the device allocator did not return
+  // any memory buffer.
+  if (!Alloc)
+    return Plugin::error("Invalid target data allocation kind or requested "
+                         "allocator not implemented yet");
 
-  // At this point means that we did not tried to allocate from the memory
-  // manager nor the device allocator.
-  return Plugin::error("Invalid target data allocation kind or requested "
-                       "allocator not implemented yet");
+  // Register allocated buffer as pinned memory if the type is host memory.
+  if (Kind == TARGET_ALLOC_HOST)
+    if (auto Err = registerHostPinnedMemoryBuffer(Alloc, Size))
+      return Err;
+
+  return Alloc;
 }
 
 Error GenericDeviceTy::dataDelete(void *TgtPtr, TargetAllocTy Kind) {
@@ -410,6 +436,11 @@ Error GenericDeviceTy::dataDelete(void *TgtPtr, TargetAllocTy Kind) {
 
   if (Res)
     return Plugin::error("Failure to deallocate device pointer %p", TgtPtr);
+
+  // Unregister deallocated pinned memory buffer if the type is host memory.
+  if (Kind == TARGET_ALLOC_HOST)
+    if (auto Err = unregisterHostPinnedMemoryBuffer(TgtPtr))
+      return Err;
 
   return Plugin::success();
 }
@@ -599,7 +630,10 @@ int32_t __tgt_rtl_is_valid_binary(__tgt_device_image *TgtImage) {
   if (!Plugin::isActive())
     return false;
 
-  return elf_check_machine(TgtImage, Plugin::get().getMagicElfBits());
+  if (elf_check_machine(TgtImage, Plugin::get().getMagicElfBits()))
+    return true;
+
+  return jit::checkBitcodeImage(TgtImage, Plugin::get().getTripleArch());
 }
 
 int32_t __tgt_rtl_is_valid_binary_info(__tgt_device_image *TgtImage,
@@ -670,7 +704,37 @@ int32_t __tgt_rtl_is_data_exchangable(int32_t SrcDeviceId,
 __tgt_target_table *__tgt_rtl_load_binary(int32_t DeviceId,
                                           __tgt_device_image *TgtImage) {
   GenericPluginTy &Plugin = Plugin::get();
-  auto TableOrErr = Plugin.getDevice(DeviceId).loadBinary(Plugin, TgtImage);
+  GenericDeviceTy &Device = Plugin.getDevice(DeviceId);
+
+  // If it is a bitcode image, we have to jit the binary image before loading to
+  // the device.
+  {
+    UInt32Envar JITOptLevel("LIBOMPTARGET_JIT_OPT_LEVEL", 3);
+    Triple::ArchType TA = Plugin.getTripleArch();
+    std::string Arch = Device.getArch();
+
+    jit::PostProcessingFn PostProcessing =
+        [&Device](std::unique_ptr<MemoryBuffer> MB)
+        -> Expected<std::unique_ptr<MemoryBuffer>> {
+      return Device.doJITPostProcessing(std::move(MB));
+    };
+
+    if (jit::checkBitcodeImage(TgtImage, TA)) {
+      auto TgtImageOrErr =
+          jit::compile(TgtImage, TA, Arch, JITOptLevel, PostProcessing);
+      if (!TgtImageOrErr) {
+        auto Err = TgtImageOrErr.takeError();
+        REPORT("Failure to jit binary image from bitcode image %p on device "
+               "%d: %s\n",
+               TgtImage, DeviceId, toString(std::move(Err)).data());
+        return nullptr;
+      }
+
+      TgtImage = *TgtImageOrErr;
+    }
+  }
+
+  auto TableOrErr = Device.loadBinary(Plugin, TgtImage);
   if (!TableOrErr) {
     auto Err = TableOrErr.takeError();
     REPORT("Failure to load binary image %p on device %d: %s\n", TgtImage,

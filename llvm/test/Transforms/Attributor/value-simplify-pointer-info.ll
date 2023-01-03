@@ -1620,7 +1620,7 @@ entry:
 define i8 @local_alloca_not_simplifiable_2(i64 %index1, i64 %index2, i1 %cnd) {
 ; TUNIT: Function Attrs: nofree norecurse nosync nounwind willreturn
 ; TUNIT-LABEL: define {{[^@]+}}@local_alloca_not_simplifiable_2
-; TUNIT-SAME: (i64 [[INDEX1:%.*]], i64 [[INDEX2:%.*]], i1 [[CND:%.*]]) #[[ATTR3]] {
+; TUNIT-SAME: (i64 [[INDEX1:%.*]], i64 [[INDEX2:%.*]], i1 noundef [[CND:%.*]]) #[[ATTR3]] {
 ; TUNIT-NEXT:  entry:
 ; TUNIT-NEXT:    [[BYTES:%.*]] = alloca [1024 x i8], align 16
 ; TUNIT-NEXT:    [[GEP0:%.*]] = getelementptr inbounds [1024 x i8], [1024 x i8]* [[BYTES]], i64 0, i64 0
@@ -1640,7 +1640,7 @@ define i8 @local_alloca_not_simplifiable_2(i64 %index1, i64 %index2, i1 %cnd) {
 ;
 ; CGSCC: Function Attrs: nofree norecurse nosync nounwind willreturn
 ; CGSCC-LABEL: define {{[^@]+}}@local_alloca_not_simplifiable_2
-; CGSCC-SAME: (i64 [[INDEX1:%.*]], i64 [[INDEX2:%.*]], i1 [[CND:%.*]]) #[[ATTR5]] {
+; CGSCC-SAME: (i64 [[INDEX1:%.*]], i64 [[INDEX2:%.*]], i1 noundef [[CND:%.*]]) #[[ATTR5]] {
 ; CGSCC-NEXT:  entry:
 ; CGSCC-NEXT:    [[BYTES:%.*]] = alloca [1024 x i8], align 16
 ; CGSCC-NEXT:    [[GEP0:%.*]] = getelementptr inbounds [1024 x i8], [1024 x i8]* [[BYTES]], i64 0, i64 0
@@ -3002,7 +3002,7 @@ for.body7:                                        ; preds = %for.cond4
 define internal i1 @alloca_non_unique(i32* %p, i32 %in, i1 %c) {
 ; TUNIT: Function Attrs: nofree nosync nounwind memory(argmem: readwrite)
 ; TUNIT-LABEL: define {{[^@]+}}@alloca_non_unique
-; TUNIT-SAME: (i32* nocapture nofree nonnull readonly align 4 [[P:%.*]], i32 [[IN:%.*]], i1 [[C:%.*]]) #[[ATTR12:[0-9]+]] {
+; TUNIT-SAME: (i32* nocapture nofree nonnull readonly align 4 [[P:%.*]], i32 [[IN:%.*]], i1 noundef [[C:%.*]]) #[[ATTR12:[0-9]+]] {
 ; TUNIT-NEXT:    [[A:%.*]] = alloca i32, align 4
 ; TUNIT-NEXT:    store i32 [[IN]], i32* [[A]], align 4
 ; TUNIT-NEXT:    br i1 [[C]], label [[T:%.*]], label [[F:%.*]]
@@ -3016,7 +3016,7 @@ define internal i1 @alloca_non_unique(i32* %p, i32 %in, i1 %c) {
 ;
 ; CGSCC: Function Attrs: nofree nosync nounwind memory(argmem: readwrite)
 ; CGSCC-LABEL: define {{[^@]+}}@alloca_non_unique
-; CGSCC-SAME: (i32* nocapture nofree nonnull readonly align 4 [[P:%.*]], i32 [[IN:%.*]], i1 [[C:%.*]]) #[[ATTR14:[0-9]+]] {
+; CGSCC-SAME: (i32* nocapture nofree nonnull readonly align 4 [[P:%.*]], i32 [[IN:%.*]], i1 noundef [[C:%.*]]) #[[ATTR14:[0-9]+]] {
 ; CGSCC-NEXT:    [[A:%.*]] = alloca i32, align 4
 ; CGSCC-NEXT:    store i32 [[IN]], i32* [[A]], align 4
 ; CGSCC-NEXT:    br i1 [[C]], label [[T:%.*]], label [[F:%.*]]
@@ -3050,8 +3050,8 @@ define i1 @alloca_non_unique_caller(i32 %in, i1 %c) {
 ;
 ; CGSCC: Function Attrs: nofree nosync nounwind memory(none)
 ; CGSCC-LABEL: define {{[^@]+}}@alloca_non_unique_caller
-; CGSCC-SAME: (i32 [[IN:%.*]], i1 [[C:%.*]]) #[[ATTR15:[0-9]+]] {
-; CGSCC-NEXT:    [[R:%.*]] = call i1 @alloca_non_unique(i32* undef, i32 [[IN]], i1 [[C]]) #[[ATTR23]]
+; CGSCC-SAME: (i32 [[IN:%.*]], i1 noundef [[C:%.*]]) #[[ATTR15:[0-9]+]] {
+; CGSCC-NEXT:    [[R:%.*]] = call i1 @alloca_non_unique(i32* undef, i32 [[IN]], i1 noundef [[C]]) #[[ATTR23]]
 ; CGSCC-NEXT:    ret i1 [[R]]
 ;
   %r = call i1 @alloca_non_unique(i32* undef, i32 %in, i1 %c)
@@ -3130,19 +3130,14 @@ entry:
   ret i8 %i
 }
 
-; FIXME: This should be simplifiable. See comment inside.
-
 define i8 @gep_index_from_memory(i1 %cnd1, i1 %cnd2) {
 ; CHECK: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
 ; CHECK-LABEL: define {{[^@]+}}@gep_index_from_memory
 ; CHECK-SAME: (i1 [[CND1:%.*]], i1 [[CND2:%.*]]) #[[ATTR4]] {
 ; CHECK-NEXT:  entry:
 ; CHECK-NEXT:    [[BYTES:%.*]] = alloca [1024 x i8], align 16
-; CHECK-NEXT:    [[GEP_FIXED:%.*]] = getelementptr inbounds [1024 x i8], [1024 x i8]* [[BYTES]], i64 0, i64 12
 ; CHECK-NEXT:    [[GEP_LOADED:%.*]] = getelementptr inbounds [1024 x i8], [1024 x i8]* [[BYTES]], i64 0, i64 12
-; CHECK-NEXT:    store i8 100, i8* [[GEP_LOADED]], align 4
-; CHECK-NEXT:    [[I:%.*]] = load i8, i8* [[GEP_FIXED]], align 4
-; CHECK-NEXT:    ret i8 [[I]]
+; CHECK-NEXT:    ret i8 100
 ;
 entry:
   %Bytes = alloca [1024 x i8], align 16
@@ -3152,8 +3147,6 @@ entry:
   %offset = load i64, i64* %gep.addr, align 8
   %gep.fixed = getelementptr inbounds [1024 x i8], [1024 x i8]* %Bytes, i64 0, i64 12
 
-  ; FIXME: AAPotentialConstantValues does not detect the constant offset being
-  ; passed to this GEP. It needs to rely on AAPotentialValues.
   %gep.loaded = getelementptr inbounds [1024 x i8], [1024 x i8]* %Bytes, i64 0, i64 %offset
   store i8 100, i8* %gep.loaded, align 4
 
@@ -3167,7 +3160,7 @@ entry:
 define i32 @a(i1 %c) {
 ; TUNIT: Function Attrs: nofree nosync nounwind
 ; TUNIT-LABEL: define {{[^@]+}}@a
-; TUNIT-SAME: (i1 [[C:%.*]]) #[[ATTR14]] {
+; TUNIT-SAME: (i1 noundef [[C:%.*]]) #[[ATTR14]] {
 ; TUNIT-NEXT:    store i32 3, i32* @G, align 4
 ; TUNIT-NEXT:    br i1 [[C]], label [[T:%.*]], label [[F:%.*]]
 ; TUNIT:       t:
@@ -3180,7 +3173,7 @@ define i32 @a(i1 %c) {
 ;
 ; CGSCC: Function Attrs: nofree nosync nounwind
 ; CGSCC-LABEL: define {{[^@]+}}@a
-; CGSCC-SAME: (i1 [[C:%.*]]) #[[ATTR17]] {
+; CGSCC-SAME: (i1 noundef [[C:%.*]]) #[[ATTR17]] {
 ; CGSCC-NEXT:    store i32 3, i32* @G, align 4
 ; CGSCC-NEXT:    br i1 [[C]], label [[T:%.*]], label [[F:%.*]]
 ; CGSCC:       t:

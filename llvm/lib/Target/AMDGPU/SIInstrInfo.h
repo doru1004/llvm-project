@@ -188,9 +188,8 @@ public:
 
   bool isIgnorableUse(const MachineOperand &MO) const override;
 
-  bool areLoadsFromSameBasePtr(SDNode *Load1, SDNode *Load2,
-                               int64_t &Offset1,
-                               int64_t &Offset2) const override;
+  bool areLoadsFromSameBasePtr(SDNode *Load0, SDNode *Load1, int64_t &Offset0,
+                               int64_t &Offset1) const override;
 
   bool getMemOperandsWithOffsetWidth(
       const MachineInstr &LdSt,
@@ -266,11 +265,11 @@ public:
     return commuteOpcode(MI.getOpcode());
   }
 
-  bool findCommutedOpIndices(const MachineInstr &MI, unsigned &SrcOpIdx1,
-                             unsigned &SrcOpIdx2) const override;
+  bool findCommutedOpIndices(const MachineInstr &MI, unsigned &SrcOpIdx0,
+                             unsigned &SrcOpIdx1) const override;
 
-  bool findCommutedOpIndices(MCInstrDesc Desc, unsigned & SrcOpIdx0,
-   unsigned & SrcOpIdx1) const;
+  bool findCommutedOpIndices(MCInstrDesc Desc, unsigned &SrcOpIdx0,
+                             unsigned &SrcOpIdx1) const;
 
   bool isBranchOffsetInRange(unsigned BranchOpc,
                              int64_t BrOffset) const override;
@@ -625,11 +624,6 @@ public:
 
   bool isSGPRSpill(uint16_t Opcode) const {
     return get(Opcode).TSFlags & SIInstrFlags::SGPRSpill;
-  }
-
-  static bool isWWMRegSpillOpcode(uint16_t Opcode) {
-    return Opcode == AMDGPU::SI_SPILL_WWM_V32_SAVE ||
-           Opcode == AMDGPU::SI_SPILL_WWM_V32_RESTORE;
   }
 
   static bool isDPP(const MachineInstr &MI) {
