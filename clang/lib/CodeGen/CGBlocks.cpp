@@ -1457,7 +1457,8 @@ llvm::Function *CodeGenFunction::GenerateBlockFunction(
   for (DeclMapTy::const_iterator i = ldm.begin(), e = ldm.end(); i != e; ++i) {
     const auto *var = dyn_cast<VarDecl>(i->first);
     if (var && !var->hasLocalStorage())
-      setAddrOfLocalVar(var, i->second);
+      printf("===> setAddrOfLocalVar 6\n");
+      setAddrOfLocalVar(var, i->second, 6);
   }
 
   // Begin building the function declaration.
@@ -1551,7 +1552,8 @@ llvm::Function *CodeGenFunction::GenerateBlockFunction(
 
     Builder.CreateStore(capture.getConstant(), alloca);
 
-    setAddrOfLocalVar(variable, alloca);
+    printf("===> setAddrOfLocalVar 7\n");
+    setAddrOfLocalVar(variable, alloca, 7);
   }
 
   // Save a spot to insert the debug information for all the DeclRefExprs.

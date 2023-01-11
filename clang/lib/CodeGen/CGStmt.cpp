@@ -1025,13 +1025,20 @@ void CodeGenFunction::EmitDoStmt(const DoStmt &S,
 
 void CodeGenFunction::EmitForStmt(const ForStmt &S,
                                   ArrayRef<const Attr *> ForAttrs) {
+  printf("EmitForStmt\n");
   JumpDest LoopExit = getJumpDestInCurrentScope("for.end");
+  printf("EmitForStmt - after jump\n");
 
   LexicalScope ForScope(*this, S.getSourceRange());
+  printf("EmitForStmt - after scope creation\n");
+  const Stmt *Initializer = S.getInit();
+  Initializer->dump();
 
   // Evaluate the first part before the loop.
   if (S.getInit())
     EmitStmt(S.getInit());
+  
+  printf("EmitForStmt - after init\n");
 
   // Start the loop with a block that tests the condition.
   // If there's an increment, the continue scope will be overwritten
@@ -1039,6 +1046,8 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
   JumpDest CondDest = getJumpDestInCurrentScope("for.cond");
   llvm::BasicBlock *CondBlock = CondDest.getBlock();
   EmitBlock(CondBlock);
+
+  printf("EmitForStmt - after condition\n");
 
   Expr::EvalResult Result;
   bool CondIsConstInt =
@@ -1111,6 +1120,8 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
   }
   incrementProfileCounter(&S);
 
+  printf("EmitForStmt - after more cond analysis\n");
+
   {
     // Create a separate cleanup scope for the body, in case it is not
     // a compound statement.
@@ -1118,11 +1129,15 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
     EmitStmt(S.getBody());
   }
 
+  printf("EmitForStmt - after cleanup\n");
+
   // If there is an increment, emit it next.
   if (S.getInc()) {
     EmitBlock(Continue.getBlock());
     EmitStmt(S.getInc());
   }
+
+  printf("EmitForStmt - after increment\n");
 
   BreakContinueStack.pop_back();
 
@@ -1131,12 +1146,15 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
   EmitStopPoint(&S);
   EmitBranch(CondBlock);
 
+  printf("EmitForStmt - after stop block\n");
+
   ForScope.ForceCleanup();
 
   LoopStack.pop();
 
   // Emit the fall-through block.
   EmitBlock(LoopExit.getBlock(), true);
+  printf("EmitForStmt - after fall through block\n");
 }
 
 void

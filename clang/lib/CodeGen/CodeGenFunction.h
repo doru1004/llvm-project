@@ -4692,9 +4692,13 @@ private:
       DeferredReplacements;
 
   /// Set the address of a local variable.
-  void setAddrOfLocalVar(const VarDecl *VD, Address Addr) {
+  void setAddrOfLocalVar(const VarDecl *VD, Address Addr, int type) {
+    printf("Add Addr of local var to LocalDeclMap (%d):\n", LocalDeclMap.size());
+    if (type != 10)
+      VD->dump();
     assert(!LocalDeclMap.count(VD) && "Decl already exists in LocalDeclMap!");
     LocalDeclMap.insert({VD, Addr});
+    printf("Size after insert: (%p) LocalDeclMap (%d)\n", LocalDeclMap, LocalDeclMap.size());
   }
 
   /// ExpandTypeFromArgs - Reconstruct a structure of type \arg Ty

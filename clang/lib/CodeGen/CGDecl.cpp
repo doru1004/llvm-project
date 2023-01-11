@@ -421,7 +421,8 @@ void CodeGenFunction::EmitStaticVarDecl(const VarDecl &D,
   // Store into LocalDeclMap before generating initializer to handle
   // circular references.
   llvm::Type *elemTy = ConvertTypeForMem(D.getType());
-  setAddrOfLocalVar(&D, Address(addr, elemTy, alignment));
+  printf("===> setAddrOfLocalVar 8\n");
+  setAddrOfLocalVar(&D, Address(addr, elemTy, alignment), 8);
 
   // We can't have a VLA here, but we can have a pointer to a VLA,
   // even though that doesn't really make any sense.
@@ -1610,7 +1611,8 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
     EmitAndRegisterVariableArrayDimensions(DI, D, EmitDebugInfo);
   }
 
-  setAddrOfLocalVar(&D, address);
+  printf("===> setAddrOfLocalVar 9\n");
+  setAddrOfLocalVar(&D, address, 9);
   emission.Addr = address;
   emission.AllocaAddr = AllocaAddr;
 
@@ -2596,7 +2598,8 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
   if (DoStore)
     EmitStoreOfScalar(ArgVal, lv, /* isInitialization */ true);
 
-  setAddrOfLocalVar(&D, DeclPtr);
+  printf("===> setAddrOfLocalVar 10\n");
+  setAddrOfLocalVar(&D, DeclPtr, 10);
 
   // Emit debug info for param declarations in non-thunk functions.
   if (CGDebugInfo *DI = getDebugInfo()) {

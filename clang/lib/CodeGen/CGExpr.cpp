@@ -189,6 +189,8 @@ llvm::Value *CodeGenFunction::EvaluateExprAsBool(const Expr *E) {
 /// EmitIgnoredExpr - Emit code to compute the specified expression,
 /// ignoring the result.
 void CodeGenFunction::EmitIgnoredExpr(const Expr *E) {
+  printf("Emit Ignored Expression!\n");
+  printf("E->isPRValue() = %d\n", E->isPRValue());
   if (E->isPRValue())
     return (void)EmitAnyExpr(E, AggValueSlot::ignored(), true);
 
@@ -213,12 +215,16 @@ void CodeGenFunction::EmitIgnoredExpr(const Expr *E) {
 RValue CodeGenFunction::EmitAnyExpr(const Expr *E,
                                     AggValueSlot aggSlot,
                                     bool ignoreResult) {
+  printf("EmitAnyExpr\n");
   switch (getEvaluationKind(E->getType())) {
   case TEK_Scalar:
+    printf("TEK_Scalar\n");
     return RValue::get(EmitScalarExpr(E, ignoreResult));
   case TEK_Complex:
+    printf("TEK_Complex\n");
     return RValue::getComplex(EmitComplexExpr(E, ignoreResult, ignoreResult));
   case TEK_Aggregate:
+    printf("TEK_Aggregate\n");
     if (!ignoreResult && aggSlot.isIgnored())
       aggSlot = CreateAggTemp(E->getType(), "agg-temp");
     EmitAggExpr(E, aggSlot);
@@ -1235,11 +1241,15 @@ bool CodeGenFunction::IsWrappedCXXThis(const Expr *Obj) {
 }
 
 LValue CodeGenFunction::EmitCheckedLValue(const Expr *E, TypeCheckKind TCK) {
+  printf("EmitCheckedLValue\n");
+  E->dump();
+  printf(" ===> Cond = %d\n", SanOpts.has(SanitizerKind::ArrayBounds) && isa<ArraySubscriptExpr>(E));
   LValue LV;
   if (SanOpts.has(SanitizerKind::ArrayBounds) && isa<ArraySubscriptExpr>(E))
     LV = EmitArraySubscriptExpr(cast<ArraySubscriptExpr>(E), /*Accessed*/true);
   else
     LV = EmitLValue(E);
+  printf("LV done!\n");
   if (!isa<DeclRefExpr>(E) && !LV.isBitField() && LV.isSimple()) {
     SanitizerSet SkippedChecks;
     if (const auto *ME = dyn_cast<MemberExpr>(E)) {
@@ -1271,6 +1281,7 @@ LValue CodeGenFunction::EmitCheckedLValue(const Expr *E, TypeCheckKind TCK) {
 /// length type, this is not possible.
 ///
 LValue CodeGenFunction::EmitLValue(const Expr *E) {
+  printf("EmitLValue\n");
   ApplyDebugLocation DL(*this, E);
   switch (E->getStmtClass()) {
   default: return EmitUnsupportedLValue(E, "l-value expression");
@@ -1302,6 +1313,8 @@ LValue CodeGenFunction::EmitLValue(const Expr *E) {
   case Expr::VAArgExprClass:
     return EmitVAArgExprLValue(cast<VAArgExpr>(E));
   case Expr::DeclRefExprClass:
+    printf("About to call EmitDeclRefLValue\n");
+    cast<DeclRefExpr>(E)->dump();
     return EmitDeclRefLValue(cast<DeclRefExpr>(E));
   case Expr::ConstantExprClass: {
     const ConstantExpr *CE = cast<ConstantExpr>(E);
@@ -2717,13 +2730,17 @@ static bool canEmitSpuriousReferenceToVariable(CodeGenFunction &CGF,
 }
 
 LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
+  printf("EmitDeclRefLValue\n");
   const NamedDecl *ND = E->getDecl();
   QualType T = E->getType();
+
+  ND->dump();
 
   assert(E->isNonOdrUse() != NOUR_Unevaluated &&
          "should not emit an unevaluated operand");
 
   if (const auto *VD = dyn_cast<VarDecl>(ND)) {
+    printf("EmitDeclRefLValue - ND is VarDecl\n");
     // Global Named registers access via intrinsics only
     if (VD->getStorageClass() == SC_Register &&
         VD->hasAttr<AsmLabelAttr>() && !VD->isLocalVarDecl())
@@ -2736,13 +2753,16 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     if (E->isNonOdrUse() == NOUR_Constant &&
         (VD->getType()->isReferenceType() ||
          !canEmitSpuriousReferenceToVariable(*this, E, VD, true))) {
+      printf("EmitDeclRefLValue - DeclRefExpr cannot emit ref\n");
       VD->getAnyInitializer(VD);
       llvm::Constant *Val = ConstantEmitter(*this).emitAbstract(
           E->getLocation(), *VD->evaluateValue(), VD->getType());
       assert(Val && "failed to emit constant expression");
+      Val->dump();
 
       Address Addr = Address::invalid();
       if (!VD->getType()->isReferenceType()) {
+        printf("NOT A REFERENCE TYPE\n");
         // Spill the constant value to a global.
         Addr = CGM.createUnnamedGlobalFrom(*VD, Val,
                                            getContext().getDeclAlign(VD));
@@ -2751,6 +2771,7 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
             VarTy, getTypes().getTargetAddressSpace(VD->getType()));
         Addr = Builder.CreatePointerBitCastOrAddrSpaceCast(Addr, PTy, VarTy);
       } else {
+        printf("REFERENCE TYPE\n");
         // Should we be using the alignment of the constant pointer we emitted?
         CharUnits Alignment =
             CGM.getNaturalTypeAlignment(E->getType(),
@@ -2761,16 +2782,23 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
       }
       return MakeAddrLValue(Addr, T, AlignmentSource::Decl);
     }
+    printf("===> After ref check\n");
 
     // FIXME: Handle other kinds of non-odr-use DeclRefExprs.
 
     // Check for captured variables.
     if (E->refersToEnclosingVariableOrCapture()) {
+      printf("refersToEnclosingVariableOrCapture\n");
       VD = VD->getCanonicalDecl();
-      if (auto *FD = LambdaCaptureFields.lookup(VD))
+      VD->dump();
+      if (auto *FD = LambdaCaptureFields.lookup(VD)) {
+        printf("Is a lambda capture!\n");
         return EmitCapturedFieldLValue(*this, FD, CXXABIThisValue);
+      }
       if (CapturedStmtInfo) {
+        printf("CapturedSTMTINFO NOT NULL!!\n");
         auto I = LocalDeclMap.find(VD);
+        printf("Var Decl found in the (%p) LocalDeclMap (%d) = %d\n", LocalDeclMap, LocalDeclMap.size(), I != LocalDeclMap.end());
         if (I != LocalDeclMap.end()) {
           LValue CapLVal;
           if (VD->getType()->isReferenceType())
@@ -2785,6 +2813,8 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
             CapLVal.setNontemporal(/*Value=*/true);
           return CapLVal;
         }
+        printf("Try to find the Var Decl among the captured decl:\n");
+        // CapturedStmtInfo->lookup(VD)->dump();
         LValue CapLVal =
             EmitCapturedFieldLValue(*this, CapturedStmtInfo->lookup(VD),
                                     CapturedStmtInfo->getContextValue());

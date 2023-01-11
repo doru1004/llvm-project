@@ -4425,6 +4425,7 @@ Value *ScalarExprEmitter::EmitCompare(const BinaryOperator *E,
 }
 
 Value *ScalarExprEmitter::VisitBinAssign(const BinaryOperator *E) {
+  printf("VisitBinAssign\n");
   bool Ignore = TestAndClearIgnoreResultAssign();
 
   Value *RHS;
@@ -4432,27 +4433,35 @@ Value *ScalarExprEmitter::VisitBinAssign(const BinaryOperator *E) {
 
   switch (E->getLHS()->getType().getObjCLifetime()) {
   case Qualifiers::OCL_Strong:
+    printf("OCL_Strong\n");
     std::tie(LHS, RHS) = CGF.EmitARCStoreStrong(E, Ignore);
     break;
 
   case Qualifiers::OCL_Autoreleasing:
+    printf("OCL_Autoreleasing\n");
     std::tie(LHS, RHS) = CGF.EmitARCStoreAutoreleasing(E);
     break;
 
   case Qualifiers::OCL_ExplicitNone:
+    printf("OCL_ExplicitNone\n");
     std::tie(LHS, RHS) = CGF.EmitARCStoreUnsafeUnretained(E, Ignore);
     break;
 
   case Qualifiers::OCL_Weak:
+    printf("OCL_Weak\n");
     RHS = Visit(E->getRHS());
     LHS = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
     RHS = CGF.EmitARCStoreWeak(LHS.getAddress(CGF), RHS, Ignore);
     break;
 
   case Qualifiers::OCL_None:
+    printf("OCL_None\n");
     // __block variables need to have the rhs evaluated first, plus
     // this should improve codegen just a little.
     RHS = Visit(E->getRHS());
+    RHS->dump();
+    E->getLHS()->dump();
+    printf("After printing both sides!\n");
     LHS = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
 
     // Store the value into the LHS.  Bit-fields are handled specially
@@ -4466,6 +4475,8 @@ Value *ScalarExprEmitter::VisitBinAssign(const BinaryOperator *E) {
       CGF.EmitStoreThroughLValue(RValue::get(RHS), LHS);
     }
   }
+
+  printf("Done with switch case statement!\n");
 
   // If the result is clearly ignored, return now.
   if (Ignore)

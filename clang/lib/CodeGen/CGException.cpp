@@ -1957,7 +1957,7 @@ void CodeGenFunction::EmitCapturedLocals(CodeGenFunction &ParentCGF,
     Address ParentVar = I->second;
     Address Recovered =
         recoverAddrOfEscapedLocal(ParentCGF, ParentVar, ParentFP);
-    setAddrOfLocalVar(VD, Recovered);
+    setAddrOfLocalVar(VD, Recovered, 11);
 
     if (isa<ImplicitParamDecl>(VD)) {
       CXXABIThisAlignment = ParentCGF.CXXABIThisAlignment;

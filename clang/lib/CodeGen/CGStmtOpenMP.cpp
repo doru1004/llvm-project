@@ -54,6 +54,7 @@ class OMPLexicalScope : public CodeGenFunction::LexicalScope {
             if (!I->hasAttr<OMPCaptureNoInitAttr>()) {
               CGF.EmitVarDecl(cast<VarDecl>(*I));
             } else {
+              printf("EmitAutoVarAlloca - 1\n");
               CodeGenFunction::AutoVarEmission Emission =
                   CGF.EmitAutoVarAlloca(cast<VarDecl>(*I));
               CGF.EmitAutoVarCleanups(Emission);
@@ -222,6 +223,7 @@ public:
             if (!I->hasAttr<OMPCaptureNoInitAttr>()) {
               CGF.EmitVarDecl(cast<VarDecl>(*I));
             } else {
+              printf("EmitAutoVarAlloca - 2\n");
               CodeGenFunction::AutoVarEmission Emission =
                   CGF.EmitAutoVarAlloca(cast<VarDecl>(*I));
               CGF.EmitAutoVarCleanups(Emission);
@@ -879,6 +881,7 @@ bool CodeGenFunction::EmitOMPFirstprivateClause(const OMPExecutableDirective &D,
           // Emit VarDecl with copy init for arrays.
           // Get the address of the original variable captured in current
           // captured region.
+          printf("EmitAutoVarAlloca - 3\n");
           AutoVarEmission Emission = EmitAutoVarAlloca(*VD);
           const Expr *Init = VD->getInit();
           if (!isa<CXXConstructExpr>(Init) || isTrivialInitializer(Init)) {
@@ -894,7 +897,8 @@ bool CodeGenFunction::EmitOMPFirstprivateClause(const OMPExecutableDirective &D,
                   // initialization.
                   RunCleanupsScope InitScope(*this);
                   // Emit initialization for single element.
-                  setAddrOfLocalVar(VDInit, SrcElement);
+                  printf("===> setAddrOfLocalVar 1\n");
+                  setAddrOfLocalVar(VDInit, SrcElement, 1);
                   EmitAnyExprToMem(Init, DestElement,
                                    Init->getType().getQualifiers(),
                                    /*IsInitializer*/ false);
@@ -909,7 +913,8 @@ bool CodeGenFunction::EmitOMPFirstprivateClause(const OMPExecutableDirective &D,
           // Emit private VarDecl with copy init.
           // Remap temp VDInit variable to the address of the original
           // variable (for proper handling of captured global variables).
-          setAddrOfLocalVar(VDInit, OriginalAddr);
+          printf("===> setAddrOfLocalVar 2\n");
+          setAddrOfLocalVar(VDInit, OriginalAddr, 2);
           EmitDecl(*VD);
           LocalDeclMap.erase(VDInit);
           Address VDAddr = GetAddrOfLocalVar(VD);
@@ -926,7 +931,8 @@ bool CodeGenFunction::EmitOMPFirstprivateClause(const OMPExecutableDirective &D,
             EmitStoreOfScalar(V, MakeAddrLValue(VDAddr, (*IRef)->getType(),
                                                 AlignmentSource::Decl));
             LocalDeclMap.erase(VD);
-            setAddrOfLocalVar(VD, VDAddr);
+            printf("===> setAddrOfLocalVar 3\n");
+            setAddrOfLocalVar(VD, VDAddr, 3);
           }
           IsRegistered = PrivateScope.addPrivate(OrigVD, VDAddr);
         }
@@ -1083,7 +1089,8 @@ bool CodeGenFunction::EmitOMPLastprivateClauseInit(
           if (C->getKind() == OMPC_LASTPRIVATE_conditional) {
             VDAddr = CGM.getOpenMPRuntime().emitLastprivateConditionalInit(
                 *this, OrigVD);
-            setAddrOfLocalVar(VD, VDAddr);
+            printf("===> setAddrOfLocalVar 4\n");
+            setAddrOfLocalVar(VD, VDAddr, 4);
           } else {
             // Emit private VarDecl with copy init.
             EmitDecl(*VD);
@@ -1234,6 +1241,7 @@ void CodeGenFunction::EmitOMPReductionClauseInit(
     // Emit private VarDecl with reduction init.
     RedCG.emitSharedOrigLValue(*this, Count);
     RedCG.emitAggregateType(*this, Count);
+    printf("EmitAutoVarAlloca - 4\n");
     AutoVarEmission Emission = EmitAutoVarAlloca(*PrivateVD);
     RedCG.emitInitialization(*this, Count, Emission.getAllocatedAddress(),
                              RedCG.getSharedLValue(Count).getAddress(*this),
@@ -1543,6 +1551,7 @@ static void emitCommonOMPParallelDirective(
     CodeGenFunction &CGF, const OMPExecutableDirective &S,
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
     const CodeGenBoundParametersTy &CodeGenBoundParameters) {
+  printf("emitCommonOMPParallelDirective\n");
   const CapturedStmt *CS = S.getCapturedStmt(OMPD_parallel);
   llvm::Value *NumThreads = nullptr;
   llvm::Function *OutlinedFn =
@@ -1729,6 +1738,7 @@ void CodeGenFunction::OMPBuilderCBHelpers::EmitOMPOutlinedRegionBody(
 }
 
 void CodeGenFunction::EmitOMPParallelDirective(const OMPParallelDirective &S) {
+  printf("EmitOMPParallelDirective\n");
   if (CGM.getLangOpts().OpenMPIRBuilder) {
     llvm::OpenMPIRBuilder &OMPBuilder = CGM.getOpenMPRuntime().getOMPBuilder();
     // Check if we have any if clause associated with the directive.
@@ -2149,6 +2159,7 @@ bool CodeGenFunction::EmitOMPLinearClauseInit(const OMPLoopDirective &D) {
       const auto *VD = cast<VarDecl>(cast<DeclRefExpr>(Init)->getDecl());
       if (const auto *Ref =
               dyn_cast<DeclRefExpr>(VD->getInit()->IgnoreImpCasts())) {
+        printf("EmitAutoVarAlloca - 5\n");
         AutoVarEmission Emission = EmitAutoVarAlloca(*VD);
         const auto *OrigVD = cast<VarDecl>(Ref->getDecl());
         DeclRefExpr DRE(getContext(), const_cast<VarDecl *>(OrigVD),
@@ -2258,6 +2269,7 @@ void CodeGenFunction::EmitOMPPrivateLoopCounters(
     const auto *VD = cast<VarDecl>(cast<DeclRefExpr>(E)->getDecl());
     const auto *PrivateVD = cast<VarDecl>(cast<DeclRefExpr>(*I)->getDecl());
     // Emit var without initialization.
+    printf("EmitAutoVarAlloca - 6\n");
     AutoVarEmission VarEmission = EmitAutoVarAlloca(*PrivateVD);
     EmitAutoVarCleanups(VarEmission);
     LocalDeclMap.erase(PrivateVD);
@@ -3890,6 +3902,7 @@ convertClauseKindToSchedKind(OpenMPScheduleClauseKind ScheduleClauseKind) {
 }
 
 void CodeGenFunction::EmitOMPForDirective(const OMPForDirective &S) {
+  printf("EmitOMPForDirective\n");
   bool HasLastprivates = false;
   bool UseOMPIRBuilder =
       CGM.getLangOpts().OpenMPIRBuilder && isSupportedByOpenMPIRBuilder(S);
@@ -4396,6 +4409,7 @@ void CodeGenFunction::EmitOMPCriticalDirective(const OMPCriticalDirective &S) {
 
 void CodeGenFunction::EmitOMPParallelForDirective(
     const OMPParallelForDirective &S) {
+  printf("EmitOMPParallelForDirective\n");
   // Emit directive as a combined directive that consists of two implicit
   // directives: 'parallel' with 'for' directive.
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
@@ -7255,7 +7269,8 @@ void CodeGenFunction::EmitOMPUseDevicePtrClause(
     // the original variable is a reference.
     llvm::Type *Ty = ConvertTypeForMem(OrigVD->getType().getNonReferenceType());
     Address InitAddr = Builder.CreateElementBitCast(InitAddrIt->second, Ty);
-    setAddrOfLocalVar(InitVD, InitAddr);
+    printf("===> setAddrOfLocalVar 5\n");
+    setAddrOfLocalVar(InitVD, InitAddr, 5);
 
     // Emit private declaration, it will be initialized by the value we
     // declaration we just added to the local declarations map.
@@ -7860,9 +7875,21 @@ void CodeGenFunction::EmitOMPTargetUpdateDirective(
 
 void CodeGenFunction::EmitOMPGenericLoopDirective(
     const OMPGenericLoopDirective &S) {
+  printf("EmitOMPGenericLoopDirective\n");
   // Unimplemented, just inline the underlying statement for now.
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
-    CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+    printf("About to emit the Loop Statement!!!\n");
+    S.dump();
+    cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt()->dump();
+    {
+      OMPPrivateScope LoopScope(CGF);
+      printf("========================== START\n");
+      CGF.EmitOMPPrivateLoopCounters(S, LoopScope);
+      (void)LoopScope.Privatize();
+      CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+      printf("========================== END\n");
+      LoopScope.restoreMap();
+    }
   };
   OMPLexicalScope Scope(*this, S, OMPD_unknown);
   CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_loop, CodeGen);
