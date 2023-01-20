@@ -476,10 +476,10 @@ def FeatureR128A16 : SubtargetFeature<"r128-a16",
   "Support gfx9-style A16 for 16-bit coordinates/gradients/lod/clamp/mip image operands, where a16 is aliased with r128"
 >;
 
-def FeatureGFX10A16 : SubtargetFeature<"a16",
-  "HasGFX10A16",
+def FeatureA16 : SubtargetFeature<"a16",
+  "HasA16",
   "true",
-  "Support gfx10-style A16 for 16-bit coordinates/gradients/lod/clamp/mip image operands"
+  "Support A16 for 16-bit coordinates/gradients/lod/clamp/mip image operands"
 >;
 
 def FeatureG16 : SubtargetFeature<"g16",
@@ -534,6 +534,12 @@ def FeatureDLInsts : SubtargetFeature<"dl-insts",
   "HasDLInsts",
   "true",
   "Has v_fmac_f32 and v_xnor_b32 instructions"
+>;
+
+def FeatureVFmacF64Inst : SubtargetFeature<"vfmacf64-inst",
+  "HasVFmacF64Inst",
+  "true",
+  "Has v_fmac_f64 instruction"
 >;
 
 def FeatureDot1Insts : SubtargetFeature<"dot1-insts",
@@ -723,6 +729,12 @@ def FeatureVOPD : SubtargetFeature<"vopd",
   "Has VOPD dual issue wave32 instructions"
 >;
 
+def FeatureVALUTransUseHazard : SubtargetFeature<"valu-trans-use-hazard",
+  "HasVALUTransUseHazard",
+  "true",
+  "Hazard when TRANS instructions are closely followed by a use of the result"
+>;
+
 //===------------------------------------------------------------===//
 // Subtarget Features (options and debugging)
 //===------------------------------------------------------------===//
@@ -901,7 +913,7 @@ def FeatureGFX9 : GCNSubtargetFeatureGeneration<"GFX9",
    FeatureFlatInstOffsets, FeatureFlatGlobalInsts, FeatureFlatScratchInsts,
    FeatureAddNoCarryInsts, FeatureGFX8Insts, FeatureGFX7GFX8GFX9Insts,
    FeatureScalarFlatScratchInsts, FeatureScalarAtomics, FeatureR128A16,
-   FeatureSMemTimeInst, FeatureFastDenormalF32, FeatureSupportsXNACK,
+   FeatureA16, FeatureSMemTimeInst, FeatureFastDenormalF32, FeatureSupportsXNACK,
    FeatureUnalignedBufferAccess, FeatureUnalignedDSAccess,
    FeatureNegativeScratchOffsetBug
   ]
@@ -921,7 +933,7 @@ def FeatureGFX10 : GCNSubtargetFeatureGeneration<"GFX10",
    FeatureNoSdstCMPX, FeatureVscnt,
    FeatureVOP3Literal, FeatureDPP8, FeatureExtendedImageInsts,
    FeatureNoDataDepHazard, FeaturePkFmacF16Inst,
-   FeatureGFX10A16, FeatureSMemTimeInst, FeatureFastDenormalF32, FeatureG16,
+   FeatureA16, FeatureSMemTimeInst, FeatureFastDenormalF32, FeatureG16,
    FeatureUnalignedBufferAccess, FeatureUnalignedDSAccess, FeatureImageInsts
   ]
 >;
@@ -940,7 +952,7 @@ def FeatureGFX11 : GCNSubtargetFeatureGeneration<"GFX11",
    FeatureNoSdstCMPX, FeatureVscnt,
    FeatureVOP3Literal, FeatureDPP8, FeatureExtendedImageInsts,
    FeatureNoDataDepHazard, FeaturePkFmacF16Inst,
-   FeatureGFX10A16, FeatureFastDenormalF32, FeatureG16,
+   FeatureA16, FeatureFastDenormalF32, FeatureG16,
    FeatureUnalignedBufferAccess, FeatureUnalignedDSAccess
   ]
 >;
@@ -1108,6 +1120,7 @@ def FeatureISAVersion9_0_A : FeatureSet<
    FeatureFmaMixInsts,
    FeatureLDSBankCount32,
    FeatureDLInsts,
+   FeatureVFmacF64Inst,
    FeatureDot1Insts,
    FeatureDot2Insts,
    FeatureDot3Insts,
@@ -1146,6 +1159,7 @@ def FeatureISAVersion9_4_0 : FeatureSet<
    FeatureFmaMixInsts,
    FeatureLDSBankCount32,
    FeatureDLInsts,
+   FeatureVFmacF64Inst,
    FeatureDot1Insts,
    FeatureDot2Insts,
    FeatureDot3Insts,
@@ -1305,7 +1319,7 @@ def FeatureISAVersion11_Common : FeatureSet<
    FeatureImageInsts,
    FeaturePackedTID,
    FeatureVcmpxPermlaneHazard,
-   FeatureBackOffBarrier,
+   FeatureVALUTransUseHazard,
    FeatureMADIntraFwdBug]>;
 
 def FeatureISAVersion11_0_0 : FeatureSet<
@@ -1329,8 +1343,6 @@ def FeatureISAVersion11_0_3 : FeatureSet<
 
 def AMDGPUInstrInfo : InstrInfo {
   let guessInstructionProperties = 1;
-  let noNamedPositionallyEncodedOperands = 1;
-  let useDeprecatedPositionallyEncodedOperands = 1;
 }
 
 def AMDGPUAsmParser : AsmParser {
@@ -1678,8 +1690,8 @@ def HasExtendedImageInsts : Predicate<"Subtarget->hasExtendedImageInsts()">,
 def HasR128A16 : Predicate<"Subtarget->hasR128A16()">,
   AssemblerPredicate<(all_of FeatureR128A16)>;
 
-def HasGFX10A16 : Predicate<"Subtarget->hasGFX10A16()">,
-  AssemblerPredicate<(all_of FeatureGFX10A16)>;
+def HasA16 : Predicate<"Subtarget->hasA16()">,
+  AssemblerPredicate<(all_of FeatureA16)>;
 
 def HasG16 : Predicate<"Subtarget->hasG16()">,
   AssemblerPredicate<(all_of FeatureG16)>;
@@ -1717,6 +1729,9 @@ def HasFmaMixInsts : Predicate<"Subtarget->hasFmaMixInsts()">,
 
 def HasDLInsts : Predicate<"Subtarget->hasDLInsts()">,
   AssemblerPredicate<(all_of FeatureDLInsts)>;
+
+def HasVFmacF64Inst : Predicate<"Subtarget->hasVFmacF64Inst()">,
+  AssemblerPredicate<(all_of FeatureVFmacF64Inst)>;
 
 def HasDot1Insts : Predicate<"Subtarget->hasDot1Insts()">,
   AssemblerPredicate<(all_of FeatureDot1Insts)>;

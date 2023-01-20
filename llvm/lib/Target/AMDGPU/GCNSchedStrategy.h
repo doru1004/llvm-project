@@ -78,15 +78,21 @@ public:
   // An error margin is necessary because of poor performance of the generic RP
   // tracker and can be adjusted up for tuning heuristics to try and more
   // aggressively reduce register pressure.
-  const unsigned DefaultErrorMargin = 3;
+  unsigned ErrorMargin = 3;
 
-  const unsigned HighRPErrorMargin = 10;
+  // Bias for SGPR limits under a high register pressure.
+  const unsigned HighRPSGPRBias = 7;
 
-  unsigned ErrorMargin = DefaultErrorMargin;
+  // Bias for VGPR limits under a high register pressure.
+  const unsigned HighRPVGPRBias = 7;
 
   unsigned SGPRCriticalLimit;
 
   unsigned VGPRCriticalLimit;
+
+  unsigned SGPRLimitBias = 0;
+
+  unsigned VGPRLimitBias = 0;
 
   GCNSchedStrategy(const MachineSchedContext *C);
 
@@ -125,6 +131,33 @@ protected:
 public:
   GCNMaxILPSchedStrategy(const MachineSchedContext *C);
 };
+
+class ScheduleMetrics {
+  unsigned ScheduleLength;
+  unsigned BubbleCycles;
+
+public:
+  ScheduleMetrics() {}
+  ScheduleMetrics(unsigned L, unsigned BC)
+      : ScheduleLength(L), BubbleCycles(BC) {}
+  unsigned getLength() const { return ScheduleLength; }
+  unsigned getBubbles() const { return BubbleCycles; }
+  unsigned getMetric() const {
+    unsigned Metric = (BubbleCycles * ScaleFactor) / ScheduleLength;
+    // Metric is zero if the amount of bubbles is less than 1% which is too
+    // small. So, return 1.
+    return Metric ? Metric : 1;
+  }
+  static const unsigned ScaleFactor;
+};
+
+inline raw_ostream &operator<<(raw_ostream &OS, const ScheduleMetrics &Sm) {
+  dbgs() << "\n Schedule Metric (scaled by "
+         << ScheduleMetrics::ScaleFactor
+         << " ) is: " << Sm.getMetric() << " [ " << Sm.getBubbles() << "/"
+         << Sm.getLength() << " ]\n";
+  return OS;
+}
 
 class GCNScheduleDAGMILive final : public ScheduleDAGMILive {
   friend class GCNSchedStage;
@@ -258,6 +291,13 @@ public:
 
   // Check result of scheduling.
   void checkScheduling();
+
+  // computes the given schedule virtual execution time in clocks
+  ScheduleMetrics getScheduleMetrics(const std::vector<SUnit> &InputSchedule);
+  ScheduleMetrics getScheduleMetrics(const GCNScheduleDAGMILive &DAG);
+  unsigned computeSUnitReadyCycle(const SUnit &SU, unsigned CurrCycle,
+                                  DenseMap<unsigned, unsigned> &ReadyCycles,
+                                  const TargetSchedModel &SM);
 
   // Returns true if scheduling should be reverted.
   virtual bool shouldRevertScheduling(unsigned WavesAfter);

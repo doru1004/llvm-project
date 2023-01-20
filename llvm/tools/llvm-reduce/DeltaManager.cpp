@@ -31,6 +31,7 @@
 #include "deltas/ReduceInstructionFlagsMIR.h"
 #include "deltas/ReduceInstructions.h"
 #include "deltas/ReduceInstructionsMIR.h"
+#include "deltas/ReduceInvokes.h"
 #include "deltas/ReduceMemoryOperations.h"
 #include "deltas/ReduceMetadata.h"
 #include "deltas/ReduceModuleData.h"
@@ -48,6 +49,7 @@
 #include "deltas/RunIRPasses.h"
 #include "deltas/SimplifyInstructions.h"
 #include "deltas/StripDebugInfo.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
@@ -74,8 +76,10 @@ static cl::list<std::string>
     DELTA_PASS("function-bodies", reduceFunctionBodiesDeltaPass)               \
     DELTA_PASS("special-globals", reduceSpecialGlobalsDeltaPass)               \
     DELTA_PASS("aliases", reduceAliasesDeltaPass)                              \
+    DELTA_PASS("ifuncs", reduceIFuncsDeltaPass)                                \
     DELTA_PASS("simplify-conditionals-true", reduceConditionalsTrueDeltaPass)  \
     DELTA_PASS("simplify-conditionals-false", reduceConditionalsFalseDeltaPass)\
+    DELTA_PASS("invokes", reduceInvokesDeltaPass)                              \
     DELTA_PASS("unreachable-basic-blocks", reduceUnreachableBasicBlocksDeltaPass) \
     DELTA_PASS("basic-blocks", reduceBasicBlocksDeltaPass)                     \
     DELTA_PASS("simplify-cfg", reduceUsingSimplifyCFGDeltaPass)                \

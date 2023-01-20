@@ -600,7 +600,27 @@ mlir::LogicalResult fir::ArrayModifyOp::verify() {
 // BoxAddrOp
 //===----------------------------------------------------------------------===//
 
-mlir::OpFoldResult fir::BoxAddrOp::fold(llvm::ArrayRef<mlir::Attribute> opnds) {
+void fir::BoxAddrOp::build(mlir::OpBuilder &builder,
+                           mlir::OperationState &result, mlir::Value val) {
+  mlir::Type type =
+      llvm::TypeSwitch<mlir::Type, mlir::Type>(val.getType())
+          .Case<fir::BoxType>([&](fir::BoxType ty) -> mlir::Type {
+            mlir::Type eleTy = ty.getEleTy();
+            if (fir::isa_ref_type(eleTy))
+              return eleTy;
+            return fir::ReferenceType::get(eleTy);
+          })
+          .Case<fir::BoxCharType>([&](fir::BoxCharType ty) -> mlir::Type {
+            return fir::ReferenceType::get(ty.getEleTy());
+          })
+          .Case<fir::BoxProcType>(
+              [&](fir::BoxProcType ty) { return ty.getEleTy(); })
+          .Default([&](const auto &) { return mlir::Type{}; });
+  assert(type && "bad val type");
+  build(builder, result, type, val);
+}
+
+mlir::OpFoldResult fir::BoxAddrOp::fold(FoldAdaptor adaptor) {
   if (auto *v = getVal().getDefiningOp()) {
     if (auto box = mlir::dyn_cast<fir::EmboxOp>(v)) {
       if (!box.getSlice()) // Fold only if not sliced
@@ -616,8 +636,7 @@ mlir::OpFoldResult fir::BoxAddrOp::fold(llvm::ArrayRef<mlir::Attribute> opnds) {
 // BoxCharLenOp
 //===----------------------------------------------------------------------===//
 
-mlir::OpFoldResult
-fir::BoxCharLenOp::fold(llvm::ArrayRef<mlir::Attribute> opnds) {
+mlir::OpFoldResult fir::BoxCharLenOp::fold(FoldAdaptor adaptor) {
   if (auto v = getVal().getDefiningOp()) {
     if (auto box = mlir::dyn_cast<fir::EmboxCharOp>(v))
       return box.getLen();
@@ -885,7 +904,7 @@ void fir::ConvertOp::getCanonicalizationPatterns(
                  ForwardConstantConvertPattern>(context);
 }
 
-mlir::OpFoldResult fir::ConvertOp::fold(llvm::ArrayRef<mlir::Attribute> opnds) {
+mlir::OpFoldResult fir::ConvertOp::fold(FoldAdaptor adaptor) {
   if (getValue().getType() == getType())
     return getValue();
   if (matchPattern(getValue(), mlir::m_Op<fir::ConvertOp>())) {
@@ -1181,8 +1200,8 @@ mlir::LogicalResult fir::EmboxOp::verify() {
     return emitOpError("shape must not be provided for a scalar");
   if (getSlice() && !isArray)
     return emitOpError("slice must not be provided for a scalar");
-  if (getTdesc() && !getResult().getType().isa<fir::ClassType>())
-    return emitOpError("tdesc must be used with fir.class result type");
+  if (getSourceBox() && !getResult().getType().isa<fir::ClassType>())
+    return emitOpError("source_box must be used with fir.class result type");
   return mlir::success();
 }
 
@@ -2303,6 +2322,7 @@ mlir::LogicalResult fir::ReboxOp::verify() {
     // character type.
     const bool typeCanMismatch =
         inputEleTy.isa<fir::RecordType>() || outEleTy.isa<mlir::NoneType>() ||
+        (inputEleTy.isa<mlir::NoneType>() && outEleTy.isa<fir::RecordType>()) ||
         (getSlice() && inputEleTy.isa<fir::CharacterType>()) ||
         areCompatibleCharacterTypes(inputEleTy, outEleTy);
     if (!typeCanMismatch)

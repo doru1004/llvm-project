@@ -74,7 +74,10 @@ cc_test(
     name = "bitcode_tests",
     size = "small",
     srcs = glob(
-        ["Bitcode/*.cpp"],
+        [
+            "Bitcode/*.cpp",
+            "Bitcode/*.h",
+        ],
         allow_empty = False,
     ),
     deps = [
@@ -697,9 +700,6 @@ cc_test(
         allow_empty = False,
     ) + [
         "tools/llvm-exegesis/Common/AssemblerUtils.h",
-    ],
-    tags = [
-        "nobuildkite",  # TODO: allow user space perf monitoring on buildkite.
     ],
     deps = [
         "//llvm:AllTargetsCodeGens",

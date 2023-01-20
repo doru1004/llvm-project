@@ -75,8 +75,8 @@ public:
   /// Stores a mapping between an LLVM instruction and the imported MLIR
   /// operation if the operation returns no result. Asserts if the operation
   /// returns a result and should be added to valueMapping instead.
-  void mapNoResultOp(llvm::Instruction *inst, Operation *mlir) {
-    mapNoResultOp(inst) = mlir;
+  void mapNoResultOp(llvm::Instruction *llvm, Operation *mlir) {
+    mapNoResultOp(llvm) = mlir;
   }
 
   /// Provides write-once access to store the MLIR operation corresponding to
@@ -140,17 +140,25 @@ public:
   /// Imports `func` into the current module.
   LogicalResult processFunction(llvm::Function *func);
 
-  /// Converts function attributes of LLVM Function \p func
-  /// into LLVM dialect attributes of LLVMFuncOp \p funcOp.
+  /// Converts function attributes of LLVM Function `func` into LLVM dialect
+  /// attributes of LLVMFuncOp `funcOp`.
   void processFunctionAttributes(llvm::Function *func, LLVMFuncOp funcOp);
-
-  /// Imports `globalVar` as a GlobalOp, creating it if it doesn't exist.
-  GlobalOp processGlobal(llvm::GlobalVariable *globalVar);
 
   /// Sets the fastmath flags attribute for the imported operation `op` given
   /// the original instruction `inst`. Asserts if the operation does not
   /// implement the fastmath interface.
   void setFastmathFlagsAttr(llvm::Instruction *inst, Operation *op) const;
+
+  /// Converts LLVM metadata to corresponding MLIR representation,
+  /// e.g. metadata nodes referenced via !tbaa are converted to
+  /// TBAA operations hosted inside a MetadataOp.
+  LogicalResult convertMetadata();
+
+  /// Returns SymbolRefAttr representing TBAA metadata `node`
+  /// in `tbaaMapping`.
+  SymbolRefAttr lookupTBAAAttr(const llvm::MDNode *node) {
+    return tbaaMapping.lookup(node);
+  }
 
 private:
   /// Clears the block and value mapping before processing a new region.
@@ -165,17 +173,21 @@ private:
     constantInsertionOp = nullptr;
   }
 
+  /// Converts an LLVM global variable into an MLIR LLVM dialect global
+  /// operation if a conversion exists. Otherwise, returns failure.
+  LogicalResult convertGlobal(llvm::GlobalVariable *globalVar);
+  /// Imports the magic globals "global_ctors" and "global_dtors".
+  LogicalResult convertGlobalCtorsAndDtors(llvm::GlobalVariable *globalVar);
   /// Returns personality of `func` as a FlatSymbolRefAttr.
   FlatSymbolRefAttr getPersonalityAsAttr(llvm::Function *func);
   /// Imports `bb` into `block`, which must be initially empty.
   LogicalResult processBasicBlock(llvm::BasicBlock *bb, Block *block);
   /// Converts an LLVM intrinsic to an MLIR LLVM dialect operation if an MLIR
   /// counterpart exists. Otherwise, returns failure.
-  LogicalResult convertIntrinsic(OpBuilder &odsBuilder, llvm::CallInst *inst);
+  LogicalResult convertIntrinsic(llvm::CallInst *inst);
   /// Converts an LLVM instruction to an MLIR LLVM dialect operation if an MLIR
   /// counterpart exists. Otherwise, returns failure.
-  LogicalResult convertInstruction(OpBuilder &odsBuilder,
-                                   llvm::Instruction *inst);
+  LogicalResult convertInstruction(llvm::Instruction *inst);
   /// Converts the metadata attached to the original instruction `inst` if
   /// a dialect interfaces supports the specific kind of metadata and attaches
   /// the resulting dialect attributes to the converted operation `op`. Emits a
@@ -217,6 +229,25 @@ private:
   /// them fails. All operations are inserted at the start of the current
   /// function entry block.
   FailureOr<Value> convertConstantExpr(llvm::Constant *constant);
+  /// Returns symbol name to be used for MetadataOp containing
+  /// TBAA metadata operations. It must not conflict with the user
+  /// name space.
+  StringRef getTBAAMetadataOpName() const { return "__tbaa"; }
+  /// Returns a terminated MetadataOp into which TBAA metadata
+  /// operations can be placed. The MetadataOp is created
+  /// on the first invocation of this function.
+  MetadataOp getTBAAMetadataOp();
+  /// Performs conversion of LLVM TBAA metadata starting from
+  /// `node`. On exit from this function all nodes reachable
+  /// from `node` are converted, and tbaaMapping map is updated
+  /// (unless all dependencies have been converted by a previous
+  /// invocation of this function).
+  LogicalResult processTBAAMetadata(const llvm::MDNode *node);
+  /// Returns unique string name of a symbol that may be used
+  /// for a TBAA metadata operation. The name will contain
+  /// the provided `basename` and will be uniqued via
+  /// tbaaNodeCounter (see below).
+  std::string getNewTBAANodeName(StringRef basename);
 
   /// Builder pointing at where the next instruction should be generated.
   OpBuilder builder;
@@ -245,12 +276,20 @@ private:
   /// operations for all operations that return no result. All operations that
   /// return a result have a valueMapping entry instead.
   DenseMap<llvm::Instruction *, Operation *> noResultOpMapping;
-  /// Uniquing map of GlobalVariables.
-  DenseMap<llvm::GlobalVariable *, GlobalOp> globals;
   /// The stateful type translator (contains named structs).
   LLVM::TypeFromLLVMIRTranslator typeTranslator;
   /// Stateful debug information importer.
   std::unique_ptr<detail::DebugImporter> debugImporter;
+  /// A terminated MetadataOp where TBAA metadata operations
+  /// can be inserted.
+  MetadataOp tbaaMetadataOp{};
+  /// Mapping between LLVM TBAA metadata nodes and symbol references
+  /// to the LLVMIR dialect TBAA operations corresponding to these
+  /// nodes.
+  DenseMap<const llvm::MDNode *, SymbolRefAttr> tbaaMapping;
+  /// A counter to be used as a unique suffix for symbols
+  /// defined by TBAA operations.
+  unsigned tbaaNodeCounter = 0;
 };
 
 } // namespace LLVM

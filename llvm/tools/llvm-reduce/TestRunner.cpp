@@ -14,6 +14,7 @@
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Transforms/IPO/ThinLTOBitcodeWriter.h"
 
 using namespace llvm;
@@ -21,7 +22,7 @@ using namespace llvm;
 TestRunner::TestRunner(StringRef TestName,
                        const std::vector<std::string> &TestArgs,
                        std::unique_ptr<ReducerWorkItem> Program,
-                       std::unique_ptr<TargetMachine> TM, const char *ToolName,
+                       std::unique_ptr<TargetMachine> TM, StringRef ToolName,
                        StringRef OutputName, bool InputIsBitcode,
                        bool OutputBitcode)
     : TestName(TestName), ToolName(ToolName), TestArgs(TestArgs),
@@ -57,7 +58,7 @@ int TestRunner::run(StringRef Filename) const {
     Error E = make_error<StringError>("Error running interesting-ness test: " +
                                           ErrMsg,
                                       inconvertibleErrorCode());
-    errs() << toString(std::move(E)) << '\n';
+    WithColor::error(errs(), ToolName) << toString(std::move(E)) << '\n';
     exit(1);
   }
 
@@ -69,7 +70,7 @@ void TestRunner::setProgram(std::unique_ptr<ReducerWorkItem> P) {
   Program = std::move(P);
 }
 
-void writeBitcode(ReducerWorkItem &M, raw_ostream &OutStream) {
+void writeBitcode(const ReducerWorkItem &M, raw_ostream &OutStream) {
   if (M.LTOInfo && M.LTOInfo->IsThinLTO && M.LTOInfo->EnableSplitLTOUnit) {
     PassBuilder PB;
     LoopAnalysisManager LAM;
@@ -91,7 +92,7 @@ void writeBitcode(ReducerWorkItem &M, raw_ostream &OutStream) {
       Index = std::make_unique<ModuleSummaryIndex>(
           buildModuleSummaryIndex(M, nullptr, &PSI));
     }
-    WriteBitcodeToFile(M, OutStream, Index.get());
+    WriteBitcodeToFile(M.getModule(), OutStream, Index.get());
   }
 }
 

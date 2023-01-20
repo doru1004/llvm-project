@@ -173,7 +173,7 @@ const char *const AMDGPUTargetInfo::GCCRegNames[] = {
 };
 
 ArrayRef<const char *> AMDGPUTargetInfo::getGCCRegNames() const {
-  return llvm::makeArrayRef(GCCRegNames);
+  return llvm::ArrayRef(GCCRegNames);
 }
 
 bool AMDGPUTargetInfo::initFeatureMap(
@@ -199,7 +199,6 @@ bool AMDGPUTargetInfo::initFeatureMap(
       Features["dot7-insts"] = true;
       Features["dot8-insts"] = true;
       Features["dl-insts"] = true;
-      Features["flat-address-space"] = true;
       Features["16-bit-insts"] = true;
       Features["dpp"] = true;
       Features["gfx8-insts"] = true;
@@ -223,7 +222,6 @@ bool AMDGPUTargetInfo::initFeatureMap(
       Features["dot6-insts"] = true;
       Features["dot7-insts"] = true;
       Features["dl-insts"] = true;
-      Features["flat-address-space"] = true;
       Features["16-bit-insts"] = true;
       Features["dpp"] = true;
       Features["gfx8-insts"] = true;
@@ -246,7 +244,6 @@ bool AMDGPUTargetInfo::initFeatureMap(
       IsWave32Capable = true;
       Features["dl-insts"] = true;
       Features["ci-insts"] = true;
-      Features["flat-address-space"] = true;
       Features["16-bit-insts"] = true;
       Features["dpp"] = true;
       Features["gfx8-insts"] = true;
@@ -299,7 +296,6 @@ bool AMDGPUTargetInfo::initFeatureMap(
     case GK_GFX701:
     case GK_GFX700:
       Features["ci-insts"] = true;
-      Features["flat-address-space"] = true;
       [[fallthrough]];
     case GK_GFX602:
     case GK_GFX601:
@@ -429,8 +425,8 @@ void AMDGPUTargetInfo::adjust(DiagnosticsEngine &Diags, LangOptions &Opts) {
 }
 
 ArrayRef<Builtin::Info> AMDGPUTargetInfo::getTargetBuiltins() const {
-  return llvm::makeArrayRef(BuiltinInfo, clang::AMDGPU::LastTSBuiltin -
-                                             Builtin::FirstTSBuiltin);
+  return llvm::ArrayRef(BuiltinInfo,
+                        clang::AMDGPU::LastTSBuiltin - Builtin::FirstTSBuiltin);
 }
 
 void AMDGPUTargetInfo::getTargetDefines(const LangOptions &Opts,

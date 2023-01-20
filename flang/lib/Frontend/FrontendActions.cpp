@@ -697,8 +697,8 @@ void CodeGenAction::runOptimizationPipeline(llvm::raw_pwrite_stream &os) {
   llvm::PassInstrumentationCallbacks pic;
   llvm::PipelineTuningOptions pto;
   std::optional<llvm::PGOOptions> pgoOpt;
-  llvm::StandardInstrumentations si(
-      llvmModule->getContext(), opts.DebugPassManager);
+  llvm::StandardInstrumentations si(llvmModule->getContext(),
+                                    opts.DebugPassManager);
   si.registerCallbacks(pic, &fam);
   llvm::PassBuilder pb(tm.get(), pto, pgoOpt, &pic);
 
