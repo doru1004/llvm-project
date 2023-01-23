@@ -70,7 +70,7 @@ struct InlineDescriptor {
   /// Flag indicating if the field is the active member of a union.
   unsigned IsActive : 1;
   /// Flag indicating if the field is mutable (if in a record).
-  unsigned IsMutable : 1; // TODO: Rename to IsFieldMutable.
+  unsigned IsFieldMutable : 1;
 
   Descriptor *Desc;
 };
@@ -205,13 +205,14 @@ private:
 
   /// Returns a pointer to storage.
   T *data();
+  const T *data() const;
 
 public:
   /// Initializes an element. Returns true when object if fully initialized.
   bool initialize(unsigned I);
 
   /// Checks if an element was initialized.
-  bool isInitialized(unsigned I);
+  bool isInitialized(unsigned I) const;
 
   /// Allocates a map holding N elements.
   static InitMap *allocate(unsigned N);

@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "InterpFrame.h"
+#include "Boolean.h"
 #include "Function.h"
 #include "InterpStack.h"
 #include "InterpState.h"
@@ -41,7 +42,7 @@ InterpFrame::InterpFrame(InterpState &S, const Function *Func,
       ID->IsActive = true;
       ID->Offset = sizeof(InlineDescriptor);
       ID->IsBase = false;
-      ID->IsMutable = false;
+      ID->IsFieldMutable = false;
       ID->IsConst = false;
       ID->IsInitialized = false;
     }

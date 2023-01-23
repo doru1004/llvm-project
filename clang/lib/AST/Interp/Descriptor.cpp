@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Descriptor.h"
+#include "Boolean.h"
 #include "Pointer.h"
 #include "PrimType.h"
 #include "Record.h"
@@ -77,9 +78,10 @@ static void ctorArrayDesc(Block *B, char *Ptr, bool IsConst, bool IsMutable,
     Desc->IsBase = false;
     Desc->IsActive = IsActive;
     Desc->IsConst = IsConst || D->IsConst;
-    Desc->IsMutable = IsMutable || D->IsMutable;
+    Desc->IsFieldMutable = IsMutable || D->IsMutable;
     if (auto Fn = D->ElemDesc->CtorFn)
-      Fn(B, ElemLoc, Desc->IsConst, Desc->IsMutable, IsActive, D->ElemDesc);
+      Fn(B, ElemLoc, Desc->IsConst, Desc->IsFieldMutable, IsActive,
+         D->ElemDesc);
   }
 }
 
@@ -130,9 +132,10 @@ static void ctorRecord(Block *B, char *Ptr, bool IsConst, bool IsMutable,
     Desc->IsBase = IsBase;
     Desc->IsActive = IsActive && !IsUnion;
     Desc->IsConst = IsConst || F->IsConst;
-    Desc->IsMutable = IsMutable || F->IsMutable;
+    Desc->IsFieldMutable = IsMutable || F->IsMutable;
     if (auto Fn = F->CtorFn)
-      Fn(B, Ptr + SubOff, Desc->IsConst, Desc->IsMutable, Desc->IsActive, F);
+      Fn(B, Ptr + SubOff, Desc->IsConst, Desc->IsFieldMutable, Desc->IsActive,
+         F);
   };
   for (const auto &B : D->ElemRecord->bases())
     CtorSub(B.Offset, B.Desc, /*isBase=*/true);
@@ -279,6 +282,11 @@ InitMap::T *InitMap::data() {
   return reinterpret_cast<T *>(Start);
 }
 
+const InitMap::T *InitMap::data() const {
+  auto *Start = reinterpret_cast<const char *>(this) + align(sizeof(InitMap));
+  return reinterpret_cast<const T *>(Start);
+}
+
 bool InitMap::initialize(unsigned I) {
   unsigned Bucket = I / PER_FIELD;
   T Mask = T(1) << (I % PER_FIELD);
@@ -289,7 +297,7 @@ bool InitMap::initialize(unsigned I) {
   return UninitFields == 0;
 }
 
-bool InitMap::isInitialized(unsigned I) {
+bool InitMap::isInitialized(unsigned I) const {
   unsigned Bucket = I / PER_FIELD;
   return data()[Bucket] & (T(1) << (I % PER_FIELD));
 }
