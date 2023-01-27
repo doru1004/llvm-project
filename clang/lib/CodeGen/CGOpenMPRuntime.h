@@ -1441,7 +1441,7 @@ public:
                             bool SeparateBeginEndCalls)
         : llvm::OpenMPIRBuilder::TargetDataInfo(RequiresDevicePointerInfo,
                                                 SeparateBeginEndCalls) {}
-    /// Map between the a declaration of a capture and the corresponding base
+    /// Map between the declaration of a capture and the corresponding base
     /// pointer address where the runtime returns the device pointers.
     llvm::DenseMap<const ValueDecl *, Address> CaptureDeviceAddrMap;
   };

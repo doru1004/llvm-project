@@ -5024,6 +5024,7 @@ void CodeGenFunction::EmitOMPTargetTaskBasedDirective(
   VarDecl *PVD = nullptr;
   VarDecl *SVD = nullptr;
   VarDecl *MVD = nullptr;
+  VarDecl *IVD = nullptr;
   if (InputInfo.NumberOfTargetItems > 0) {
     auto *CD = CapturedDecl::Create(
         getContext(), getContext().getTranslationUnitDecl(), /*NumParams=*/0);
@@ -5041,9 +5042,15 @@ void CodeGenFunction::EmitOMPTargetTaskBasedDirective(
         /*IndexTypeQuals=*/0);
     SVD = createImplicitFirstprivateForType(getContext(), Data, SizesType, CD,
                                             S.getBeginLoc());
+    // Doru: TODO: Change the type of this array to a struct of 3 i_64 vals.
+    // IVD = createImplicitFirstprivateForType(
+    //     getContext(), Data, BaseAndPointerAndMapperType, CD, S.getBeginLoc());
+    IVD = createImplicitFirstprivateForType(getContext(), Data, SizesType, CD,
+                                            S.getBeginLoc());
     TargetScope.addPrivate(BPVD, InputInfo.BasePointersArray);
     TargetScope.addPrivate(PVD, InputInfo.PointersArray);
     TargetScope.addPrivate(SVD, InputInfo.SizesArray);
+    TargetScope.addPrivate(IVD, InputInfo.IteratorsArray);
     // If there is no user-defined mapper, the mapper array will be nullptr. In
     // this case, we don't need to privatize it.
     if (!isa_and_nonnull<llvm::ConstantPointerNull>(
@@ -5055,7 +5062,7 @@ void CodeGenFunction::EmitOMPTargetTaskBasedDirective(
   }
   (void)TargetScope.Privatize();
   buildDependences(S, Data);
-  auto &&CodeGen = [&Data, &S, CS, &BodyGen, BPVD, PVD, SVD, MVD,
+  auto &&CodeGen = [&Data, &S, CS, &BodyGen, BPVD, PVD, SVD, MVD, IVD,
                     &InputInfo](CodeGenFunction &CGF, PrePostActionTy &Action) {
     // Set proper addresses for generated private copies.
     OMPPrivateScope Scope(CGF);
@@ -5095,6 +5102,7 @@ void CodeGenFunction::EmitOMPTargetTaskBasedDirective(
       }
     }
     CGF.processInReduction(S, Data, CGF, CS, Scope);
+    printf("Interaction with BasePointerArray in Task based emission!\n");
     if (InputInfo.NumberOfTargetItems > 0) {
       InputInfo.BasePointersArray = CGF.Builder.CreateConstArrayGEP(
           CGF.GetAddrOfLocalVar(BPVD), /*Index=*/0);
@@ -5106,6 +5114,8 @@ void CodeGenFunction::EmitOMPTargetTaskBasedDirective(
       if (MVD)
         InputInfo.MappersArray = CGF.Builder.CreateConstArrayGEP(
             CGF.GetAddrOfLocalVar(MVD), /*Index=*/0);
+      InputInfo.IteratorsArray = CGF.Builder.CreateConstArrayGEP(
+          CGF.GetAddrOfLocalVar(IVD), /*Index=*/0);
     }
 
     Action.Enter(CGF);
@@ -6610,6 +6620,8 @@ static void emitCommonOMPTargetDirective(CodeGenFunction &CGF,
     }
     return nullptr;
   };
+
+  // Doru: this is where we emit the target call for a target region
   CGM.getOpenMPRuntime().emitTargetCall(CGF, S, Fn, FnID, IfCond, Device,
                                         SizeEmitter);
 }

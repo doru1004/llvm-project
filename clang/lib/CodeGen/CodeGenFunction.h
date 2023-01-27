@@ -3485,6 +3485,7 @@ public:
     Address PointersArray = Address::invalid();
     Address SizesArray = Address::invalid();
     Address MappersArray = Address::invalid();
+    Address IteratorsArray = Address::invalid();
     unsigned NumberOfTargetItems = 0;
     explicit OMPTargetDataInfo() = default;
     OMPTargetDataInfo(Address BasePointersArray, Address PointersArray,

@@ -5910,7 +5910,7 @@ public:
                                    const OMPMappableExprListSizeTy &Sizes);
 
   /// Fetches Expr * of iterator modifier.
-  Expr *getIteratorModifier() {
+  Expr *getIteratorModifier() const LLVM_READONLY {
     return getTrailingObjects<Expr *>()[2 * varlist_size()];
   }
 

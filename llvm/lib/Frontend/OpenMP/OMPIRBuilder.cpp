@@ -4145,6 +4145,8 @@ void OpenMPIRBuilder::emitOffloadingArraysArgument(IRBuilderBase &Builder,
     RTArgs.MapTypesArray = ConstantPointerNull::get(Int64PtrTy);
     RTArgs.MapNamesArray = ConstantPointerNull::get(VoidPtrPtrTy);
     RTArgs.MappersArray = ConstantPointerNull::get(VoidPtrPtrTy);
+    // RTArgs.IteratorsArray = ConstantPointerNull::get(VoidPtrPtrTy);
+    RTArgs.IteratorsArray = ConstantPointerNull::get(Int64PtrTy);
     return;
   }
 
@@ -4182,6 +4184,20 @@ void OpenMPIRBuilder::emitOffloadingArraysArgument(IRBuilderBase &Builder,
   else
     RTArgs.MappersArray =
         Builder.CreatePointerCast(Info.RTArgs.MappersArray, VoidPtrPtrTy);
+
+  // If there is no user-defined iterator, set the iterator array to nullptr
+  // Doru TODO: perhaps change the type of this array
+  // if (!Info.HasIterators)
+  //   RTArgs.IteratorsArray = ConstantPointerNull::get(VoidPtrPtrTy);
+  // else
+  //   RTArgs.IteratorsArray =
+  //       Builder.CreatePointerCast(Info.RTArgs.IteratorsArray, VoidPtrPtrTy);
+  // if (!Info.HasIterators)
+  //   RTArgs.IteratorsArray = ConstantPointerNull::get(Int64PtrTy);
+  // else
+  RTArgs.IteratorsArray = Builder.CreateConstInBoundsGEP2_32(
+      ArrayType::get(Int64Ty, Info.NumberOfPtrs), Info.RTArgs.IteratorsArray,
+      /*Idx0=*/0, /*Idx1=*/0);
 }
 
 bool OpenMPIRBuilder::checkAndEmitFlushAfterAtomic(

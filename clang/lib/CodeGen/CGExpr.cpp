@@ -2723,6 +2723,7 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
   assert(E->isNonOdrUse() != NOUR_Unevaluated &&
          "should not emit an unevaluated operand");
 
+  printf("---> EmitDeclRefLValue 1\n");
   if (const auto *VD = dyn_cast<VarDecl>(ND)) {
     // Global Named registers access via intrinsics only
     if (VD->getStorageClass() == SC_Register &&
@@ -2807,6 +2808,7 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
       return MakeAddrLValue(addr, T, AlignmentSource::Decl);
     }
   }
+  printf("---> EmitDeclRefLValue 2\n");
 
   // FIXME: We should be able to assert this for FunctionDecls as well!
   // FIXME: We should be able to assert this for all DeclRefExprs, not just
@@ -2820,16 +2822,21 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     ConstantAddress Aliasee = CGM.GetWeakRefReference(VD);
     return MakeAddrLValue(Aliasee, T, AlignmentSource::Decl);
   }
+  printf("---> EmitDeclRefLValue 3\n");
 
   if (const auto *VD = dyn_cast<VarDecl>(ND)) {
     // Check if this is a global variable.
     if (VD->hasLinkage() || VD->isStaticDataMember())
       return EmitGlobalVarDeclLValue(*this, E, VD);
+    printf("---> EmitDeclRefLValue 3.1\n");
 
     Address addr = Address::invalid();
 
     // The variable should generally be present in the local decl map.
     auto iter = LocalDeclMap.find(VD);
+    // VD->getParent()->dump();
+    // CurFn->dump();
+    printf("---> EmitDeclRefLValue 3.2 %d\n", iter != LocalDeclMap.end());
     if (iter != LocalDeclMap.end()) {
       addr = iter->second;
 
@@ -2887,6 +2894,7 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     setObjCGCLValueClass(getContext(), E, LV);
     return LV;
   }
+  printf("---> EmitDeclRefLValue 4\n");
 
   if (const auto *FD = dyn_cast<FunctionDecl>(ND)) {
     LValue LV = EmitFunctionDeclLValue(*this, E, FD);
@@ -2903,6 +2911,7 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
 
     return LV;
   }
+  printf("---> EmitDeclRefLValue 5\n");
 
   // FIXME: While we're emitting a binding from an enclosing scope, all other
   // DeclRefExprs we see should be implicitly treated as if they also refer to

@@ -1144,6 +1144,8 @@ public:
     /// The array of original declaration names of mapped pointers sent to the
     /// runtime library for debugging
     Value *MapNamesArray = nullptr;
+    /// The array of user-defined mappers passed to the runtime library.
+    Value *IteratorsArray = nullptr;
   };
 
   /// Struct that keeps the information that should be kept throughout
@@ -1160,6 +1162,8 @@ public:
 
     /// Indicate whether any user-defined mapper exists.
     bool HasMapper = false;
+    /// Indicate whether any user-defined mapper exists.
+    bool HasIterators = false;
     /// The total number of pointers passed to the runtime library.
     unsigned NumberOfPtrs = 0u;
 
@@ -1172,13 +1176,14 @@ public:
     void clearArrayInfo() {
       RTArgs = TargetDataRTArgs();
       HasMapper = false;
+      HasIterators = false;
       NumberOfPtrs = 0u;
     }
     /// Return true if the current target data information has valid arrays.
     bool isValid() {
       return RTArgs.BasePointersArray && RTArgs.PointersArray &&
              RTArgs.SizesArray && RTArgs.MapTypesArray &&
-             (!HasMapper || RTArgs.MappersArray) && NumberOfPtrs;
+             (!HasMapper || RTArgs.MappersArray) && NumberOfPtrs && (!HasIterators || RTArgs.IteratorsArray);
     }
     bool requiresDevicePointerInfo() { return RequiresDevicePointerInfo; }
     bool separateBeginEndCalls() { return SeparateBeginEndCalls; }
