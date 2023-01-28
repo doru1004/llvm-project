@@ -822,8 +822,11 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::emitTargetKernel(
   auto *KernelArgsPtr =
       Builder.CreateAlloca(OpenMPIRBuilder::KernelArgs, nullptr, "kernel_args");
   for (unsigned I = 0, Size = KernelArgs.size(); I != Size; ++I) {
+    // printf("I = %d (Size = %d)\n", I, KernelArgs.size());
     llvm::Value *Arg =
         Builder.CreateStructGEP(OpenMPIRBuilder::KernelArgs, KernelArgsPtr, I);
+    // Arg->dump();
+    // printf("=>\n");
     Builder.CreateAlignedStore(
         KernelArgs[I], Arg,
         M.getDataLayout().getPrefTypeAlign(KernelArgs[I]->getType()));
@@ -4184,6 +4187,8 @@ void OpenMPIRBuilder::emitOffloadingArraysArgument(IRBuilderBase &Builder,
   else
     RTArgs.MappersArray =
         Builder.CreatePointerCast(Info.RTArgs.MappersArray, VoidPtrPtrTy);
+
+  printf("OMP IR BUILDER ABOUT TO EMIT ITERATOR LOAD\n");
 
   // If there is no user-defined iterator, set the iterator array to nullptr
   // Doru TODO: perhaps change the type of this array

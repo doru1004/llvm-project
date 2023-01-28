@@ -6873,8 +6873,8 @@ public:
     MapValuesArrayTy Sizes;
     MapFlagsArrayTy Types;
     MapMappersArrayTy Mappers;
-    StructNonContiguousInfo NonContigInfo;
     MapIteratorsTy Iterators;
+    StructNonContiguousInfo NonContigInfo;
 
     /// Append arrays in \a CurInfo.
     void append(MapCombinedInfoTy &CurInfo) {
@@ -6885,6 +6885,7 @@ public:
       Sizes.append(CurInfo.Sizes.begin(), CurInfo.Sizes.end());
       Types.append(CurInfo.Types.begin(), CurInfo.Types.end());
       Mappers.append(CurInfo.Mappers.begin(), CurInfo.Mappers.end());
+      Iterators.append(CurInfo.Iterators.begin(), CurInfo.Iterators.end());
       NonContigInfo.Dims.append(CurInfo.NonContigInfo.Dims.begin(),
                                  CurInfo.NonContigInfo.Dims.end());
       NonContigInfo.Offsets.append(CurInfo.NonContigInfo.Offsets.begin(),
@@ -6893,7 +6894,6 @@ public:
                                    CurInfo.NonContigInfo.Counts.end());
       NonContigInfo.Strides.append(CurInfo.NonContigInfo.Strides.begin(),
                                     CurInfo.NonContigInfo.Strides.end());
-      Iterators.append(CurInfo.Iterators.begin(), CurInfo.Iterators.end());
     }
   };
 
@@ -10337,11 +10337,13 @@ void CGOpenMPRuntime::emitTargetCall(
     CGOpenMPRuntime::TargetDataInfo Info;
     // Fill up the arrays and create the arguments.
     emitOffloadingArrays(CGF, CombinedInfo, Info, OMPBuilder);
+    printf("TargetThenGen\n");
     bool EmitDebug =
         CGF.CGM.getCodeGenOpts().getDebugInfo() != codegenoptions::NoDebugInfo;
     OMPBuilder.emitOffloadingArraysArgument(CGF.Builder, Info.RTArgs, Info,
                                             EmitDebug,
                                             /*ForEndCall=*/false);
+    printf("TargetThenGen 2\n");
 
     InputInfo.NumberOfTargetItems = Info.NumberOfPtrs;
     InputInfo.BasePointersArray = Address(Info.RTArgs.BasePointersArray,
@@ -10352,6 +10354,9 @@ void CGOpenMPRuntime::emitTargetCall(
         Address(Info.RTArgs.SizesArray, CGF.Int64Ty, CGM.getPointerAlign());
     InputInfo.MappersArray =
         Address(Info.RTArgs.MappersArray, CGF.VoidPtrTy, CGM.getPointerAlign());
+    // TODO: Change the type:
+    InputInfo.IteratorsArray =
+        Address(Info.RTArgs.IteratorsArray, CGF.Int64Ty, CGM.getPointerAlign());
     MapTypesArray = Info.RTArgs.MapTypesArray;
     MapNamesArray = Info.RTArgs.MapNamesArray;
     if (RequiresOuterTask)
@@ -10948,6 +10953,7 @@ void CGOpenMPRuntime::emitTargetDataCalls(
     // Fill up the arrays and create the arguments.
     emitOffloadingArrays(CGF, CombinedInfo, Info, OMPBuilder,
                          /*IsNonContiguous=*/true);
+    printf("BeginThenGen\n");
 
     llvm::OpenMPIRBuilder::TargetDataRTArgs RTArgs;
     bool EmitDebug =
@@ -11223,6 +11229,7 @@ void CGOpenMPRuntime::emitTargetDataStandAloneCall(
     // Fill up the arrays and create the arguments.
     emitOffloadingArrays(CGF, CombinedInfo, Info, OMPBuilder,
                          /*IsNonContiguous=*/true);
+    printf("TargetThenGen\n");
     bool RequiresOuterTask = D.hasClausesOfKind<OMPDependClause>() ||
                              D.hasClausesOfKind<OMPNowaitClause>();
     bool EmitDebug =
