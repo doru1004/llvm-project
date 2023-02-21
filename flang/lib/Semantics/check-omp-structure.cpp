@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "check-omp-structure.h"
+#include "definable.h"
 #include "flang/Parser/parse-tree.h"
 #include "flang/Semantics/tools.h"
 #include <algorithm>
@@ -333,9 +334,9 @@ void OmpStructureChecker::CheckHintClause(
           hintClause{
               std::get_if<Fortran::parser::OmpClause::Hint>(&ompClause->u)}) {
         std::optional<std::int64_t> hintValue = GetIntValue(hintClause->v);
-        if (hintValue && hintValue.value() >= 0) {
-          if((hintValue.value() & 0xC) == 0xC /*`omp_sync_hint_nonspeculative` and `omp_lock_hint_speculative`*/ 
-                  || (hintValue.value() & 0x3) == 0x3 /*`omp_sync_hint_uncontended` and omp_sync_hint_contended*/ )
+        if (hintValue && *hintValue >= 0) {
+          if((*hintValue & 0xC) == 0xC /*`omp_sync_hint_nonspeculative` and `omp_lock_hint_speculative`*/ 
+                  || (*hintValue & 0x3) == 0x3 /*`omp_sync_hint_uncontended` and omp_sync_hint_contended*/ )
             context_.Say(clause.source,
                 "Hint clause value "
                 "is not a valid OpenMP synchronization value"_err_en_US);
@@ -962,20 +963,7 @@ void OmpStructureChecker::CheckThreadprivateOrDeclareTargetVar(
         common::visitors{
             [&](const parser::Designator &) {
               if (const auto *name{parser::Unwrap<parser::Name>(ompObject)}) {
-                const auto &useScope{
-                    context_.FindScope(GetContext().directiveSource)};
-                const auto &declScope{
-                    GetProgramUnitContaining(name->symbol->GetUltimate())};
-                const auto *sym =
-                    declScope.parent().FindSymbol(name->symbol->name());
-                if (sym &&
-                    (sym->has<MainProgramDetails>() ||
-                        sym->has<ModuleDetails>())) {
-                  context_.Say(name->source,
-                      "The module name or main program name cannot be in a %s "
-                      "directive"_err_en_US,
-                      ContextDirectiveAsFortran());
-                } else if (name->symbol->GetUltimate().IsSubprogram()) {
+                if (name->symbol->GetUltimate().IsSubprogram()) {
                   if (GetContext().directive ==
                       llvm::omp::Directive::OMPD_threadprivate)
                     context_.Say(name->source,
@@ -1001,20 +989,6 @@ void OmpStructureChecker::CheckThreadprivateOrDeclareTargetVar(
                       "A variable in a %s directive cannot be an element of a "
                       "common block"_err_en_US,
                       ContextDirectiveAsFortran());
-                } else if (!IsSave(*name->symbol) &&
-                    declScope.kind() != Scope::Kind::MainProgram &&
-                    declScope.kind() != Scope::Kind::Module) {
-                  context_.Say(name->source,
-                      "A variable that appears in a %s directive must be "
-                      "declared in the scope of a module or have the SAVE "
-                      "attribute, either explicitly or implicitly"_err_en_US,
-                      ContextDirectiveAsFortran());
-                } else if (useScope != declScope) {
-                  context_.Say(name->source,
-                      "The %s directive and the common block or variable in it "
-                      "must appear in the same declaration section of a "
-                      "scoping unit"_err_en_US,
-                      ContextDirectiveAsFortran());
                 } else if (FindEquivalenceSet(*name->symbol)) {
                   context_.Say(name->source,
                       "A variable in a %s directive cannot appear in an "
@@ -1027,6 +1001,40 @@ void OmpStructureChecker::CheckThreadprivateOrDeclareTargetVar(
                       "A THREADPRIVATE variable cannot appear in a %s "
                       "directive"_err_en_US,
                       ContextDirectiveAsFortran());
+                } else {
+                  const semantics::Scope &useScope{
+                      context_.FindScope(GetContext().directiveSource)};
+                  const semantics::Scope &curScope =
+                      name->symbol->GetUltimate().owner();
+                  if (!curScope.IsTopLevel()) {
+                    const semantics::Scope &declScope =
+                        GetProgramUnitContaining(curScope);
+                    const semantics::Symbol *sym{
+                        declScope.parent().FindSymbol(name->symbol->name())};
+                    if (sym &&
+                        (sym->has<MainProgramDetails>() ||
+                            sym->has<ModuleDetails>())) {
+                      context_.Say(name->source,
+                          "The module name or main program name cannot be in a "
+                          "%s "
+                          "directive"_err_en_US,
+                          ContextDirectiveAsFortran());
+                    } else if (!IsSave(*name->symbol) &&
+                        declScope.kind() != Scope::Kind::MainProgram &&
+                        declScope.kind() != Scope::Kind::Module) {
+                      context_.Say(name->source,
+                          "A variable that appears in a %s directive must be "
+                          "declared in the scope of a module or have the SAVE "
+                          "attribute, either explicitly or implicitly"_err_en_US,
+                          ContextDirectiveAsFortran());
+                    } else if (useScope != declScope) {
+                      context_.Say(name->source,
+                          "The %s directive and the common block or variable "
+                          "in it must appear in the same declaration section "
+                          "of a scoping unit"_err_en_US,
+                          ContextDirectiveAsFortran());
+                    }
+                  }
                 }
               }
             },
@@ -1056,6 +1064,15 @@ void OmpStructureChecker::Enter(const parser::OpenMPDeclareSimdConstruct &x) {
 }
 
 void OmpStructureChecker::Leave(const parser::OpenMPDeclareSimdConstruct &) {
+  dirContext_.pop_back();
+}
+
+void OmpStructureChecker::Enter(const parser::OpenMPRequiresConstruct &x) {
+  const auto &dir{std::get<parser::Verbatim>(x.t)};
+  PushContextAndClauseSets(dir.source, llvm::omp::Directive::OMPD_requires);
+}
+
+void OmpStructureChecker::Leave(const parser::OpenMPRequiresConstruct &) {
   dirContext_.pop_back();
 }
 
@@ -1858,6 +1875,9 @@ CHECK_SIMPLE_CLAUSE(Init, OMPC_init)
 CHECK_SIMPLE_CLAUSE(Use, OMPC_use)
 CHECK_SIMPLE_CLAUSE(Novariants, OMPC_novariants)
 CHECK_SIMPLE_CLAUSE(Nocontext, OMPC_nocontext)
+CHECK_SIMPLE_CLAUSE(At, OMPC_at)
+CHECK_SIMPLE_CLAUSE(Severity, OMPC_severity)
+CHECK_SIMPLE_CLAUSE(Message, OMPC_message)
 CHECK_SIMPLE_CLAUSE(Filter, OMPC_filter)
 CHECK_SIMPLE_CLAUSE(When, OMPC_when)
 CHECK_SIMPLE_CLAUSE(AdjustArgs, OMPC_adjust_args)
@@ -1872,6 +1892,7 @@ CHECK_REQ_SCALAR_INT_CLAUSE(Grainsize, OMPC_grainsize)
 CHECK_REQ_SCALAR_INT_CLAUSE(NumTasks, OMPC_num_tasks)
 CHECK_REQ_SCALAR_INT_CLAUSE(NumTeams, OMPC_num_teams)
 CHECK_REQ_SCALAR_INT_CLAUSE(NumThreads, OMPC_num_threads)
+CHECK_REQ_SCALAR_INT_CLAUSE(OmpxDynCgroupMem, OMPC_ompx_dyn_cgroup_mem)
 CHECK_REQ_SCALAR_INT_CLAUSE(Priority, OMPC_priority)
 CHECK_REQ_SCALAR_INT_CLAUSE(ThreadLimit, OMPC_thread_limit)
 
@@ -1963,9 +1984,9 @@ void OmpStructureChecker::CheckIntentInPointerAndDefinable(
               "in a %s clause"_err_en_US,
               symbol->name(),
               parser::ToUpperCaseLetters(getClauseName(clause).str()));
-        }
-        if (auto msg{
-                WhyNotModifiable(*symbol, context_.FindScope(name->source))}) {
+        } else if (auto msg{WhyNotDefinable(name->source,
+                       context_.FindScope(name->source), DefinabilityFlags{},
+                       *symbol)}) {
           context_
               .Say(GetContext().clauseSource,
                   "Variable '%s' on the %s clause is not definable"_err_en_US,
@@ -2572,7 +2593,8 @@ void OmpStructureChecker::CheckDefinableObjects(
   for (auto it{symbols.begin()}; it != symbols.end(); ++it) {
     const auto *symbol{it->first};
     const auto source{it->second};
-    if (auto msg{WhyNotModifiable(*symbol, context_.FindScope(source))}) {
+    if (auto msg{WhyNotDefinable(source, context_.FindScope(source),
+            DefinabilityFlags{}, *symbol)}) {
       context_
           .Say(source,
               "Variable '%s' on the %s clause is not definable"_err_en_US,
@@ -2619,24 +2641,28 @@ void OmpStructureChecker::CheckPrivateSymbolsInOuterCxt(
 bool OmpStructureChecker::CheckTargetBlockOnlyTeams(
     const parser::Block &block) {
   bool nestedTeams{false};
-  auto it{block.begin()};
 
-  if (const auto *ompConstruct{parser::Unwrap<parser::OpenMPConstruct>(*it)}) {
-    if (const auto *ompBlockConstruct{
-            std::get_if<parser::OpenMPBlockConstruct>(&ompConstruct->u)}) {
-      const auto &beginBlockDir{
-          std::get<parser::OmpBeginBlockDirective>(ompBlockConstruct->t)};
-      const auto &beginDir{
-          std::get<parser::OmpBlockDirective>(beginBlockDir.t)};
-      if (beginDir.v == llvm::omp::Directive::OMPD_teams) {
-        nestedTeams = true;
+  if (!block.empty()) {
+    auto it{block.begin()};
+    if (const auto *ompConstruct{
+            parser::Unwrap<parser::OpenMPConstruct>(*it)}) {
+      if (const auto *ompBlockConstruct{
+              std::get_if<parser::OpenMPBlockConstruct>(&ompConstruct->u)}) {
+        const auto &beginBlockDir{
+            std::get<parser::OmpBeginBlockDirective>(ompBlockConstruct->t)};
+        const auto &beginDir{
+            std::get<parser::OmpBlockDirective>(beginBlockDir.t)};
+        if (beginDir.v == llvm::omp::Directive::OMPD_teams) {
+          nestedTeams = true;
+        }
       }
+    }
+
+    if (nestedTeams && ++it == block.end()) {
+      return true;
     }
   }
 
-  if (nestedTeams && ++it == block.end()) {
-    return true;
-  }
   return false;
 }
 

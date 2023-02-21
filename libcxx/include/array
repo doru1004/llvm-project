@@ -115,7 +115,7 @@ template <size_t I, class T, size_t N> const T&& get(const array<T, N>&&) noexce
 #include <__assert> // all public C++ headers provide the assertion handler
 #include <__config>
 #include <__iterator/reverse_iterator.h>
-#include <__tuple/sfinae_helpers.h>
+#include <__tuple_dir/sfinae_helpers.h>
 #include <__utility/integer_sequence.h>
 #include <__utility/move.h>
 #include <__utility/unreachable.h>
@@ -137,8 +137,8 @@ template <size_t I, class T, size_t N> const T&& get(const array<T, N>&&) noexce
 #include <initializer_list>
 
 // [tuple.helper]
-#include <__tuple/tuple_element.h>
-#include <__tuple/tuple_size.h>
+#include <__tuple_dir/tuple_element.h>
+#include <__tuple_dir/tuple_size.h>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
@@ -266,8 +266,7 @@ struct _LIBCPP_TEMPLATE_VIS array<_Tp, 0>
     typedef _VSTD::reverse_iterator<iterator>       reverse_iterator;
     typedef _VSTD::reverse_iterator<const_iterator> const_reverse_iterator;
 
-    typedef typename conditional<is_const<_Tp>::value, const char,
-                                char>::type _CharType;
+    typedef __conditional_t<is_const<_Tp>::value, const char, char> _CharType;
 
     struct  _ArrayInStructT { _Tp __data_[1]; };
     _ALIGNAS_TYPE(_ArrayInStructT) _CharType __elems_[sizeof(_ArrayInStructT)];
@@ -377,7 +376,7 @@ struct _LIBCPP_TEMPLATE_VIS array<_Tp, 0>
 };
 
 
-#if _LIBCPP_STD_VER > 14
+#if _LIBCPP_STD_VER >= 17
 template<class _Tp, class... _Args,
          class = enable_if_t<__all<_IsSame<_Tp, _Args>::value...>::value>
          >
@@ -490,7 +489,7 @@ get(const array<_Tp, _Size>&& __a) _NOEXCEPT
     return _VSTD::move(__a.__elems_[_Ip]);
 }
 
-#if _LIBCPP_STD_VER > 17
+#if _LIBCPP_STD_VER >= 20
 
 template <typename _Tp, size_t _Size, size_t... _Index>
 _LIBCPP_INLINE_VISIBILITY constexpr array<remove_cv_t<_Tp>, _Size>
@@ -529,12 +528,13 @@ to_array(_Tp(&&__arr)[_Size]) noexcept(is_nothrow_move_constructible_v<_Tp>) {
                                        make_index_sequence<_Size>());
 }
 
-#endif // _LIBCPP_STD_VER > 17
+#endif // _LIBCPP_STD_VER >= 20
 
 _LIBCPP_END_NAMESPACE_STD
 
 #if !defined(_LIBCPP_REMOVE_TRANSITIVE_INCLUDES) && _LIBCPP_STD_VER <= 20
 #  include <algorithm>
+#  include <concepts>
 #  include <iterator>
 #  include <utility>
 #endif

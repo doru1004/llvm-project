@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -test-linalg-hoisting=test-hoist-redundant-transfers -allow-unregistered-dialect -split-input-file | FileCheck %s
+// RUN: mlir-opt  -test-transform-dialect-interpreter --split-input-file --allow-unregistered-dialect %s | FileCheck %s
 
 // CHECK-LABEL: func @hoist_vector_transfer_pairs(
 //  CHECK-SAME:   %[[MEMREF0:[a-zA-Z0-9]*]]: memref<?x?xf32>,
@@ -72,6 +72,14 @@ func.func @hoist_vector_transfer_pairs(
   }
   "unrelated_use"(%memref1) : (memref<?x?xf32>) -> ()
   return
+}
+
+transform.sequence failures(propagate) {
+^bb1(%arg1: !pdl.operation):
+  %0 = transform.structured.match ops{["func.func"]} in %arg1
+    : (!pdl.operation) -> !pdl.operation
+  transform.structured.hoist_redundant_vector_transfers %0
+    : (!pdl.operation) -> !pdl.operation
 }
 
 // -----
@@ -155,6 +163,14 @@ func.func @hoist_vector_transfer_pairs_disjoint(
   return
 }
 
+transform.sequence failures(propagate) {
+^bb1(%arg1: !pdl.operation):
+  %0 = transform.structured.match ops{["func.func"]} in %arg1
+    : (!pdl.operation) -> !pdl.operation
+  transform.structured.hoist_redundant_vector_transfers %0
+    : (!pdl.operation) -> !pdl.operation
+}
+
 // -----
 
 // CHECK-LABEL: func @hoist_vector_transfer_pairs_tensor
@@ -234,6 +250,14 @@ func.func @hoist_vector_transfer_pairs_tensor(
   return %0#0,  %0#1, %0#2, %0#3, %0#4,  %0#5 :
         tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>,
         tensor<?x?xf32>, tensor<?x?xf32>
+}
+
+transform.sequence failures(propagate) {
+^bb1(%arg1: !pdl.operation):
+  %0 = transform.structured.match ops{["func.func"]} in %arg1
+    : (!pdl.operation) -> !pdl.operation
+  transform.structured.hoist_redundant_vector_transfers %0
+    : (!pdl.operation) -> !pdl.operation
 }
 
 // -----
@@ -321,6 +345,14 @@ func.func @hoist_vector_transfer_pairs_disjoint_tensor(
     scf.yield %1#0,  %1#1, %1#2, %1#3 : tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>
   }
   return %0#0,  %0#1, %0#2, %0#3 : tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>
+}
+
+transform.sequence failures(propagate) {
+^bb1(%arg1: !pdl.operation):
+  %0 = transform.structured.match ops{["func.func"]} in %arg1
+    : (!pdl.operation) -> !pdl.operation
+  transform.structured.hoist_redundant_vector_transfers %0
+    : (!pdl.operation) -> !pdl.operation
 }
 
 // -----
@@ -432,6 +464,14 @@ func.func @hoist_vector_transfer_pairs_tensor_and_slices(
   return %0#0, %0#1, %0#2 : tensor<?x?xf32>, tensor<?x?xf32>, tensor<?x?xf32>
 }
 
+transform.sequence failures(propagate) {
+^bb1(%arg1: !pdl.operation):
+  %0 = transform.structured.match ops{["func.func"]} in %arg1
+    : (!pdl.operation) -> !pdl.operation
+  transform.structured.hoist_redundant_vector_transfers %0
+    : (!pdl.operation) -> !pdl.operation
+}
+
 // -----
 
 // CHECK-LABEL: func @hoist_vector_transfer_write_pairs_disjoint_tensor(
@@ -469,3 +509,55 @@ func.func @hoist_vector_transfer_write_pairs_disjoint_tensor(
   return %1 : tensor<?x?xf32>
 }
 
+transform.sequence failures(propagate) {
+^bb1(%arg1: !pdl.operation):
+  %0 = transform.structured.match ops{["func.func"]} in %arg1
+    : (!pdl.operation) -> !pdl.operation
+  transform.structured.hoist_redundant_vector_transfers %0
+    : (!pdl.operation) -> !pdl.operation
+}
+
+// -----
+
+// CHECK-LABEL: func @hoist_vector_transfer_pairs_in_affine_loops(
+//  CHECK-SAME:   %[[MEMREF0:[a-zA-Z0-9]+]]: memref<64x64xi32>,
+//  CHECK-SAME:   %[[MEMREF1:[a-zA-Z0-9]+]]: memref<64x64xi32>,
+//  CHECK-SAME:   %[[MEMREF2:[a-zA-Z0-9]+]]: memref<64x64xi32>) {
+//       CHECK:   %[[C0:.*]] = arith.constant 0 : i32
+//       CHECK:   affine.for %[[I:.*]] = 0 to 64 {
+//       CHECK:     affine.for %[[J:.*]] = 0 to 64 step 16 {
+//       CHECK:       %[[R0:.*]] = vector.transfer_read %[[MEMREF2]][%[[I]], %[[J]]], %[[C0]] : memref<64x64xi32>, vector<16xi32>
+//       CHECK:       %[[R:.*]] = affine.for %[[K:.*]] = 0 to 64 iter_args(%[[ACC:.*]] = %[[R0]]) -> (vector<16xi32>) {
+//       CHECK:         %[[AV:.*]] = vector.transfer_read %[[MEMREF0]][%[[I]], %[[K]]], %[[C0]] {{.*}}: memref<64x64xi32>, vector<16xi32>
+//       CHECK:         %[[BV:.*]] = vector.transfer_read %[[MEMREF1]][%[[K]], %[[J]]], %[[C0]] {{.*}}: memref<64x64xi32>, vector<16xi32>
+//       CHECK:         %[[T0:.*]] = arith.muli %[[AV]], %[[BV]] : vector<16xi32>
+//       CHECK:         %[[T1:.*]] = arith.addi %[[ACC]], %[[T0]] : vector<16xi32>
+//       CHECK:         affine.yield %[[T1]] : vector<16xi32>
+//       CHECK:       }
+//       CHECK:       vector.transfer_write %[[R]], %[[MEMREF2]][%[[I]], %[[J]]] : vector<16xi32>, memref<64x64xi32>
+//       CHECK:     }
+//       CHECK:   }
+func.func @hoist_vector_transfer_pairs_in_affine_loops(%memref0: memref<64x64xi32>, %memref1: memref<64x64xi32>, %memref2: memref<64x64xi32>) {
+  %c0_i32 = arith.constant 0 : i32
+  affine.for %arg3 = 0 to 64 {
+    affine.for %arg4 = 0 to 64 step 16 {
+      affine.for %arg5 = 0 to 64 {
+        %0 = vector.transfer_read %memref0[%arg3, %arg5], %c0_i32 {permutation_map = affine_map<(d0, d1) -> (0)>} : memref<64x64xi32>, vector<16xi32>
+        %1 = vector.transfer_read %memref1[%arg5, %arg4], %c0_i32 : memref<64x64xi32>, vector<16xi32>
+        %2 = vector.transfer_read %memref2[%arg3, %arg4], %c0_i32 : memref<64x64xi32>, vector<16xi32>
+        %3 = arith.muli %0, %1 : vector<16xi32>
+        %4 = arith.addi %2, %3 : vector<16xi32>
+        vector.transfer_write %4, %memref2[%arg3, %arg4] : vector<16xi32>, memref<64x64xi32>
+      }
+    }
+  }
+  return
+}
+
+transform.sequence failures(propagate) {
+^bb1(%arg1: !pdl.operation):
+  %0 = transform.structured.match ops{["func.func"]} in %arg1
+    : (!pdl.operation) -> !pdl.operation
+  transform.structured.hoist_redundant_vector_transfers %0
+    : (!pdl.operation) -> !pdl.operation
+}

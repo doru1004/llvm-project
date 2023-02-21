@@ -60,12 +60,17 @@ public:
     // Update the indent level cache size so that we can rely on it
     // having the right size in adjustToUnmodifiedline.
     skipLine(Line, /*UnknownIndent=*/true);
-    if (Line.InPPDirective ||
-        (Style.IndentPPDirectives == FormatStyle::PPDIS_BeforeHash &&
-         Line.Type == LT_CommentAbovePPDirective)) {
-      unsigned IndentWidth =
+    if (Style.IndentPPDirectives != FormatStyle::PPDIS_None &&
+        (Line.InPPDirective ||
+         (Style.IndentPPDirectives == FormatStyle::PPDIS_BeforeHash &&
+          Line.Type == LT_CommentAbovePPDirective))) {
+      unsigned PPIndentWidth =
           (Style.PPIndentWidth >= 0) ? Style.PPIndentWidth : Style.IndentWidth;
-      Indent = Line.Level * IndentWidth + AdditionalIndent;
+      Indent = Line.InMacroBody
+                   ? Line.PPLevel * PPIndentWidth +
+                         (Line.Level - Line.PPLevel) * Style.IndentWidth
+                   : Line.Level * PPIndentWidth;
+      Indent += AdditionalIndent;
     } else {
       Indent = getIndent(Line.Level);
     }
@@ -643,12 +648,15 @@ private:
     unsigned Length = 0;
     bool EndsWithComment = false;
     bool InPPDirective = I[0]->InPPDirective;
+    bool InMacroBody = I[0]->InMacroBody;
     const unsigned Level = I[0]->Level;
     for (; NumStmts < 3; ++NumStmts) {
       if (I + 1 + NumStmts == E)
         break;
       const AnnotatedLine *Line = I[1 + NumStmts];
       if (Line->InPPDirective != InPPDirective)
+        break;
+      if (Line->InMacroBody != InMacroBody)
         break;
       if (Line->First->isOneOf(tok::kw_case, tok::kw_default, tok::r_brace))
         break;
@@ -1427,7 +1435,7 @@ void UnwrappedLineFormatter::formatFirstToken(
     Newlines = std::min(Newlines, 1u);
   }
   // Remove empty lines at the start of nested blocks (lambdas/arrow functions)
-  if (PreviousLine == nullptr && Line.Level > 0)
+  if (!PreviousLine && Line.Level > 0)
     Newlines = std::min(Newlines, 1u);
   if (Newlines == 0 && !RootToken.IsFirst)
     Newlines = 1;

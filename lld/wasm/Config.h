@@ -14,6 +14,11 @@
 #include "llvm/ADT/StringSet.h"
 #include "llvm/BinaryFormat/Wasm.h"
 #include "llvm/Support/CachePruning.h"
+#include <optional>
+
+namespace llvm::CodeGenOpt {
+enum Level : int;
+} // namespace llvm::CodeGenOpt
 
 namespace lld {
 namespace wasm {
@@ -39,11 +44,12 @@ struct Configuration {
   bool extendedConst;
   bool growableTable;
   bool gcSections;
-  bool importMemory;
+  std::optional<std::pair<llvm::StringRef, llvm::StringRef>> memoryImport;
+  std::optional<llvm::StringRef> memoryExport;
   bool sharedMemory;
   bool importTable;
   bool importUndefined;
-  llvm::Optional<bool> is64;
+  std::optional<bool> is64;
   bool mergeDataSegments;
   bool pie;
   bool printGcSections;
@@ -53,6 +59,7 @@ struct Configuration {
   bool stripAll;
   bool stripDebug;
   bool stackFirst;
+  bool isStatic = false;
   bool trace;
   uint64_t globalBase;
   uint64_t initialMemory;
@@ -60,6 +67,7 @@ struct Configuration {
   uint64_t zStackSize;
   unsigned ltoPartitions;
   unsigned ltoo;
+  llvm::CodeGenOpt::Level ltoCgo;
   unsigned optimize;
   llvm::StringRef thinLTOJobs;
   bool ltoDebugPassManager;
@@ -75,7 +83,8 @@ struct Configuration {
   std::vector<llvm::StringRef> requiredExports;
   llvm::SmallVector<llvm::StringRef, 0> searchPaths;
   llvm::CachePruningPolicy thinLTOCachePolicy;
-  llvm::Optional<std::vector<std::string>> features;
+  std::optional<std::vector<std::string>> features;
+  std::optional<std::vector<std::string>> extraFeatures;
 
   // The following config options do not directly correspond to any
   // particular command line options.

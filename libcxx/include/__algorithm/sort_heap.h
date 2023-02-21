@@ -15,8 +15,9 @@
 #include <__algorithm/pop_heap.h>
 #include <__config>
 #include <__iterator/iterator_traits.h>
+#include <__type_traits/is_copy_assignable.h>
+#include <__type_traits/is_copy_constructible.h>
 #include <__utility/move.h>
-#include <type_traits>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
@@ -27,8 +28,7 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
 inline _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX14
 void __sort_heap(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare&& __comp) {
-  using _CompRef = typename __comp_ref_type<_Compare>::type;
-  _CompRef __comp_ref = __comp;
+  __comp_ref_type<_Compare> __comp_ref = __comp;
 
   using difference_type = typename iterator_traits<_RandomAccessIterator>::difference_type;
   for (difference_type __n = __last - __first; __n > 1; --__last, (void) --__n)

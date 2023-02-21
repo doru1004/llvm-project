@@ -20,6 +20,10 @@ namespace mlir {
 class AffineDialect;
 class ModuleOp;
 
+namespace arith {
+class WideIntEmulationConverter;
+} // namespace arith
+
 namespace func {
 class FuncDialect;
 } // namespace func
@@ -55,16 +59,29 @@ void populateResolveRankedShapeTypeResultDimsPatterns(
 /// terms of shapes of its input operands.
 void populateResolveShapedTypeResultDimsPatterns(RewritePatternSet &patterns);
 
-/// Appends patterns for simplifying extract_strided_metadata(other_op) into
-/// easier to analyze constructs.
-void populateSimplifyExtractStridedMetadataOpPatterns(
+/// Appends patterns for expanding memref operations that modify the metadata
+/// (sizes, offset, strides) of a memref into easier to analyze constructs.
+void populateExpandStridedMetadataPatterns(RewritePatternSet &patterns);
+
+/// Appends patterns for emulating wide integer memref operations with ops over
+/// narrower integer types.
+void populateMemRefWideIntEmulationPatterns(
+    arith::WideIntEmulationConverter &typeConverter,
     RewritePatternSet &patterns);
+
+/// Appends type converions for emulating wide integer memref operations with
+/// ops over narrowe integer types.
+void populateMemRefWideIntEmulationConversions(
+    arith::WideIntEmulationConverter &typeConverter);
 
 /// Transformation to do multi-buffering/array expansion to remove dependencies
 /// on the temporary allocation between consecutive loop iterations.
-/// It return success if the allocation was multi-buffered and returns failure()
-/// otherwise.
-/// Example:
+/// It returns the new allocation if the original allocation was multi-buffered
+/// and returns failure() otherwise.
+/// When `skipOverrideAnalysis`, the pass will apply the transformation
+/// without checking thwt the buffer is overrided at the beginning of each
+/// iteration. This implies that user knows that there is no data carried across
+/// loop iterations. Example:
 /// ```
 /// %0 = memref.alloc() : memref<4x128xf32>
 /// scf.for %iv = %c1 to %c1024 step %c3 {
@@ -85,17 +102,15 @@ void populateSimplifyExtractStridedMetadataOpPatterns(
 ///   "some_use"(%sv) : (memref<4x128xf32, strided<...>) -> ()
 /// }
 /// ```
-LogicalResult multiBuffer(memref::AllocOp allocOp, unsigned multiplier);
+FailureOr<memref::AllocOp> multiBuffer(memref::AllocOp allocOp,
+                                       unsigned multiplier,
+                                       bool skipOverrideAnalysis = false);
 
 //===----------------------------------------------------------------------===//
 // Passes
 //===----------------------------------------------------------------------===//
 
-#define GEN_PASS_DECL_EXPANDOPS
-#define GEN_PASS_DECL_FOLDMEMREFALIASOPS
-#define GEN_PASS_DECL_NORMALIZEMEMREFS
-#define GEN_PASS_DECL_RESOLVERANKEDSHAPETYPERESULTDIMS
-#define GEN_PASS_DECL_RESOLVESHAPEDTYPERESULTDIMS
+#define GEN_PASS_DECL
 #include "mlir/Dialect/MemRef/Transforms/Passes.h.inc"
 
 /// Creates an instance of the ExpandOps pass that legalizes memref dialect ops
@@ -123,10 +138,9 @@ std::unique_ptr<Pass> createResolveRankedShapeTypeResultDimsPass();
 /// in terms of shapes of its input operands.
 std::unique_ptr<Pass> createResolveShapedTypeResultDimsPass();
 
-/// Creates an operation pass to simplify
-/// `extract_strided_metadata(other_op(memref))` into
-/// `extract_strided_metadata(memref)`.
-std::unique_ptr<Pass> createSimplifyExtractStridedMetadataPass();
+/// Creates an operation pass to expand some memref operation into
+/// easier to reason about operations.
+std::unique_ptr<Pass> createExpandStridedMetadataPass();
 
 //===----------------------------------------------------------------------===//
 // Registration

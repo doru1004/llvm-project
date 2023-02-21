@@ -65,7 +65,7 @@ void JITLinkerBase::linkPhase2(std::unique_ptr<JITLinkerBase> Self,
   if (AR)
     Alloc = std::move(*AR);
   else
-    return Ctx->notifyFailed(AR.takeError());
+    return abandonAllocAndBailOut(std::move(Self), AR.takeError());
 
   LLVM_DEBUG({
     dbgs() << "Link graph \"" << G->getName()
@@ -75,13 +75,13 @@ void JITLinkerBase::linkPhase2(std::unique_ptr<JITLinkerBase> Self,
 
   // Run post-allocation passes.
   if (auto Err = runPasses(Passes.PostAllocationPasses))
-    return Ctx->notifyFailed(std::move(Err));
+    return abandonAllocAndBailOut(std::move(Self), std::move(Err));
 
   // Notify client that the defined symbols have been assigned addresses.
   LLVM_DEBUG(dbgs() << "Resolving symbols defined in " << G->getName() << "\n");
 
   if (auto Err = Ctx->notifyResolved(*G))
-    return Ctx->notifyFailed(std::move(Err));
+    return abandonAllocAndBailOut(std::move(Self), std::move(Err));
 
   auto ExternalSymbols = getExternalSymbolNames();
 
@@ -222,6 +222,8 @@ void JITLinkerBase::applyLookupResult(AsyncLookupResult Result) {
           orc::ExecutorAddr(ResultI->second.getAddress()));
       Sym->setLinkage(ResultI->second.getFlags().isWeak() ? Linkage::Weak
                                                           : Linkage::Strong);
+      Sym->setScope(ResultI->second.getFlags().isExported() ? Scope::Default
+                                                            : Scope::Hidden);
     } else
       assert(Sym->isWeaklyReferenced() &&
              "Failed to resolve non-weak reference");
@@ -237,6 +239,16 @@ void JITLinkerBase::applyLookupResult(AsyncLookupResult Result) {
         break;
       case Linkage::Weak:
         dbgs() << " (weak)";
+        break;
+      }
+      switch (Sym->getScope()) {
+      case Scope::Local:
+        llvm_unreachable("External symbol should not have local linkage");
+      case Scope::Hidden:
+        break;
+      case Scope::Default:
+        dbgs() << " (exported)";
+        break;
       }
       dbgs() << "\n";
     }

@@ -58,7 +58,17 @@ public:
   bool IsMathErrnoDefault() const override { return false; }
   bool IsObjCNonFragileABIDefault() const override { return true; }
 
-  CXXStdlibType GetDefaultCXXStdlibType() const override;
+  void
+  AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
+                            llvm::opt::ArgStringList &CC1Args) const override;
+
+  RuntimeLibType GetDefaultRuntimeLibType() const override {
+    return ToolChain::RLT_CompilerRT;
+  }
+  CXXStdlibType GetDefaultCXXStdlibType() const override {
+    return ToolChain::CST_Libcxx;
+  }
+
   void addLibCxxIncludePaths(const llvm::opt::ArgList &DriverArgs,
                              llvm::opt::ArgStringList &CC1Args) const override;
   void

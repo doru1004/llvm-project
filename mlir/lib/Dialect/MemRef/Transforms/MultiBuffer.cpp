@@ -15,8 +15,13 @@
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
+#include "llvm/Support/Debug.h"
 
 using namespace mlir;
+
+#define DEBUG_TYPE "memref-transforms"
+#define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
+#define DBGSNL() (llvm::dbgs() << "\n")
 
 /// Return true if the op fully overwrite the given `buffer` value.
 static bool overrideBuffer(Operation *op, Value buffer) {
@@ -45,9 +50,8 @@ static void replaceUsesAndPropagateType(Operation *oldOp, Value val,
     builder.setInsertionPoint(subviewUse);
     Type newType = memref::SubViewOp::inferRankReducedResultType(
         subviewUse.getType().getShape(), val.getType().cast<MemRefType>(),
-        extractFromI64ArrayAttr(subviewUse.getStaticOffsets()),
-        extractFromI64ArrayAttr(subviewUse.getStaticSizes()),
-        extractFromI64ArrayAttr(subviewUse.getStaticStrides()));
+        subviewUse.getStaticOffsets(), subviewUse.getStaticSizes(),
+        subviewUse.getStaticStrides());
     Value newSubview = builder.create<memref::SubViewOp>(
         subviewUse->getLoc(), newType.cast<MemRefType>(), val,
         subviewUse.getMixedOffsets(), subviewUse.getMixedSizes(),
@@ -78,37 +82,63 @@ static Value getOrCreateValue(OpFoldResult res, OpBuilder &builder,
 // Returns success if the transformation happened and failure otherwise.
 // This is not a pattern as it requires propagating the new memref type to its
 // uses and requires updating subview ops.
-LogicalResult mlir::memref::multiBuffer(memref::AllocOp allocOp,
-                                        unsigned multiplier) {
+FailureOr<memref::AllocOp>
+mlir::memref::multiBuffer(memref::AllocOp allocOp, unsigned multiplier,
+                          bool skipOverrideAnalysis) {
+  LLVM_DEBUG(DBGS() << "Try multibuffer: " << allocOp << "\n");
   DominanceInfo dom(allocOp->getParentOp());
   LoopLikeOpInterface candidateLoop;
   for (Operation *user : allocOp->getUsers()) {
     auto parentLoop = user->getParentOfType<LoopLikeOpInterface>();
-    if (!parentLoop)
+    if (!parentLoop) {
+      LLVM_DEBUG(DBGS() << "Skip user: no parent loop\n");
       return failure();
-    /// Make sure there is no loop carried dependency on the allocation.
-    if (!overrideBuffer(user, allocOp.getResult()))
-      continue;
-    // If this user doesn't dominate all the other users keep looking.
-    if (llvm::any_of(allocOp->getUsers(), [&](Operation *otherUser) {
-          return !dom.dominates(user, otherUser);
-        }))
-      continue;
+    }
+    if (!skipOverrideAnalysis) {
+      /// Make sure there is no loop-carried dependency on the allocation.
+      if (!overrideBuffer(user, allocOp.getResult())) {
+        LLVM_DEBUG(DBGS() << "Skip user: found loop-carried dependence\n");
+        continue;
+      }
+      // If this user doesn't dominate all the other users keep looking.
+      if (llvm::any_of(allocOp->getUsers(), [&](Operation *otherUser) {
+            return !dom.dominates(user, otherUser);
+          })) {
+        LLVM_DEBUG(DBGS() << "Skip user: does not dominate all other users\n");
+        continue;
+      }
+    } else {
+      if (llvm::any_of(allocOp->getUsers(), [&](Operation *otherUser) {
+            return !isa<memref::DeallocOp>(otherUser) &&
+                   !parentLoop->isProperAncestor(otherUser);
+          })) {
+        LLVM_DEBUG(
+            DBGS()
+            << "Skip user: not all other users are in the parent loop\n");
+        continue;
+      }
+    }
     candidateLoop = parentLoop;
     break;
   }
-  if (!candidateLoop)
+  if (!candidateLoop) {
+    LLVM_DEBUG(DBGS() << "Skip alloc: no candidate loop\n");
     return failure();
-  llvm::Optional<Value> inductionVar = candidateLoop.getSingleInductionVar();
-  llvm::Optional<OpFoldResult> lowerBound = candidateLoop.getSingleLowerBound();
-  llvm::Optional<OpFoldResult> singleStep = candidateLoop.getSingleStep();
-  if (!inductionVar || !lowerBound || !singleStep)
+  }
+  std::optional<Value> inductionVar = candidateLoop.getSingleInductionVar();
+  std::optional<OpFoldResult> lowerBound = candidateLoop.getSingleLowerBound();
+  std::optional<OpFoldResult> singleStep = candidateLoop.getSingleStep();
+  if (!inductionVar || !lowerBound || !singleStep) {
+    LLVM_DEBUG(DBGS() << "Skip alloc: no single iv, lb or step\n");
     return failure();
+  }
+
+  if (!dom.dominates(allocOp.getOperation(), candidateLoop)) {
+    LLVM_DEBUG(DBGS() << "Skip alloc: does not dominate candidate loop\n");
+    return failure();
+  }
+
   OpBuilder builder(candidateLoop);
-  Value stepValue =
-      getOrCreateValue(*singleStep, builder, candidateLoop->getLoc());
-  Value lowerBoundValue =
-      getOrCreateValue(*lowerBound, builder, candidateLoop->getLoc());
   SmallVector<int64_t, 4> newShape(1, multiplier);
   ArrayRef<int64_t> oldShape = allocOp.getType().getShape();
   newShape.append(oldShape.begin(), oldShape.end());
@@ -117,15 +147,27 @@ LogicalResult mlir::memref::multiBuffer(memref::AllocOp allocOp,
                                    allocOp.getType().getMemorySpace());
   builder.setInsertionPoint(allocOp);
   Location loc = allocOp->getLoc();
-  auto newAlloc = builder.create<memref::AllocOp>(loc, newMemref);
+  auto newAlloc = builder.create<memref::AllocOp>(loc, newMemref, ValueRange{},
+                                                  allocOp->getAttrs());
   builder.setInsertionPoint(&candidateLoop.getLoopBody().front(),
                             candidateLoop.getLoopBody().front().begin());
+
+  SmallVector<Value> operands = {*inductionVar};
   AffineExpr induc = getAffineDimExpr(0, allocOp.getContext());
-  AffineExpr init = getAffineDimExpr(1, allocOp.getContext());
-  AffineExpr step = getAffineDimExpr(2, allocOp.getContext());
+  unsigned dimCount = 1;
+  auto getAffineExpr = [&](OpFoldResult e) -> AffineExpr {
+    if (std::optional<int64_t> constValue = getConstantIntValue(e)) {
+      return getAffineConstantExpr(*constValue, allocOp.getContext());
+    }
+    auto value = getOrCreateValue(e, builder, candidateLoop->getLoc());
+    operands.push_back(value);
+    return getAffineDimExpr(dimCount++, allocOp.getContext());
+  };
+  auto init = getAffineExpr(*lowerBound);
+  auto step = getAffineExpr(*singleStep);
+
   AffineExpr expr = ((induc - init).floorDiv(step)) % multiplier;
-  auto map = AffineMap::get(3, 0, expr);
-  std::array<Value, 3> operands = {*inductionVar, lowerBoundValue, stepValue};
+  auto map = AffineMap::get(dimCount, 0, expr);
   Value bufferIndex = builder.create<AffineApplyOp>(loc, map, operands);
   SmallVector<OpFoldResult> offsets, sizes, strides;
   offsets.push_back(bufferIndex);
@@ -142,5 +184,5 @@ LogicalResult mlir::memref::multiBuffer(memref::AllocOp allocOp,
                                                     offsets, sizes, strides);
   replaceUsesAndPropagateType(allocOp, subview, builder);
   allocOp.erase();
-  return success();
+  return newAlloc;
 }

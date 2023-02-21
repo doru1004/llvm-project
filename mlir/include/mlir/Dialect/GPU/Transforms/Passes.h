@@ -13,8 +13,10 @@
 #ifndef MLIR_DIALECT_GPU_TRANSFORMS_PASSES_H_
 #define MLIR_DIALECT_GPU_TRANSFORMS_PASSES_H_
 
+#include "Utils.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Pass/Pass.h"
+#include <optional>
 
 namespace llvm {
 class TargetMachine;
@@ -23,14 +25,13 @@ class Module;
 } // namespace llvm
 
 namespace mlir {
+class TypeConverter;
+class ConversionTarget;
 namespace func {
 class FuncOp;
 } // namespace func
 
-#define GEN_PASS_DECL_GPULAUNCHSINKINDEXCOMPUTATIONS
-#define GEN_PASS_DECL_GPUKERNELOUTLINING
-#define GEN_PASS_DECL_GPUASYNCREGION
-#define GEN_PASS_DECL_GPUMAPPARALLELLOOPS
+#define GEN_PASS_DECL
 #include "mlir/Dialect/GPU/Transforms/Passes.h.inc"
 
 /// Pass that moves ops which are likely an index computation into gpu.launch
@@ -61,9 +62,6 @@ inline void populateGpuRewritePatterns(RewritePatternSet &patterns) {
 }
 
 namespace gpu {
-/// Returns the default annotation name for GPU binary blobs.
-std::string getDefaultGpuBinaryAnnotation();
-
 /// Base pass class to serialize kernel functions through LLVM into
 /// user-specified IR and add the resulting blob as module attribute.
 class SerializeToBlobPass : public OperationPass<gpu::GPUModuleOp> {
@@ -90,8 +88,8 @@ private:
   std::unique_ptr<llvm::TargetMachine> createTargetMachine();
 
   /// Translates the module to ISA
-  Optional<std::string> translateToISA(llvm::Module &llvmModule,
-                                       llvm::TargetMachine &targetMachine);
+  std::optional<std::string> translateToISA(llvm::Module &llvmModule,
+                                            llvm::TargetMachine &targetMachine);
 
   /// Serializes the target ISA to binary form.
   virtual std::unique_ptr<std::vector<char>>

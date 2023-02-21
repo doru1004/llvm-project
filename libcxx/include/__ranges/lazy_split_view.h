@@ -10,7 +10,6 @@
 #ifndef _LIBCPP___RANGES_LAZY_SPLIT_VIEW_H
 #define _LIBCPP___RANGES_LAZY_SPLIT_VIEW_H
 
-#include <__algorithm/in_in_result.h>
 #include <__algorithm/ranges_find.h>
 #include <__algorithm/ranges_mismatch.h>
 #include <__concepts/constructible.h>
@@ -46,7 +45,7 @@
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
-#if _LIBCPP_STD_VER > 17
+#if _LIBCPP_STD_VER >= 20
 
 namespace ranges {
 
@@ -459,7 +458,7 @@ inline namespace __cpo {
 
 } // namespace ranges
 
-#endif // _LIBCPP_STD_VER > 17
+#endif // _LIBCPP_STD_VER >= 20
 
 _LIBCPP_END_NAMESPACE_STD
 

@@ -39,6 +39,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <string>
 
 /// 32-Bit field data attributes controlling information presented to the user.
 enum OpenMPInfoType : uint32_t {
@@ -120,7 +121,7 @@ inline uint32_t getDebugLevel() {
 /// Print fatal error message with a printf string and error identifier
 #define FATAL_MESSAGE(_num, _str, ...)                                         \
   do {                                                                         \
-    fprintf(stderr, GETNAME(TARGET_NAME) " fatal error %d:" _str "\n", _num,   \
+    fprintf(stderr, GETNAME(TARGET_NAME) " fatal error %d: " _str "\n", _num,  \
             __VA_ARGS__);                                                      \
     abort();                                                                   \
   } while (0)
