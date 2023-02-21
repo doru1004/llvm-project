@@ -12,8 +12,8 @@
 
 #include "named_pair.h"
 #include "src/__support/CPP/type_traits.h"
-#include "src/__support/common.h"
-#include "src/__support/compiler_features.h"
+#include "src/__support/macros/attributes.h"          // LIBC_INLINE
+#include "src/__support/macros/config.h"              // LIBC_HAS_BUILTIN
 
 namespace __llvm_libc {
 
@@ -31,24 +31,26 @@ template <typename T> LIBC_INLINE int correct_zero(T val, int bits) {
 }
 
 template <typename T> LIBC_INLINE int clz(T val);
-template <> inline int clz<unsigned int>(unsigned int val) {
+template <> LIBC_INLINE int clz<unsigned int>(unsigned int val) {
   return __builtin_clz(val);
 }
-template <> inline int clz<unsigned long int>(unsigned long int val) {
+template <> LIBC_INLINE int clz<unsigned long int>(unsigned long int val) {
   return __builtin_clzl(val);
 }
-template <> inline int clz<unsigned long long int>(unsigned long long int val) {
+template <>
+LIBC_INLINE int clz<unsigned long long int>(unsigned long long int val) {
   return __builtin_clzll(val);
 }
 
 template <typename T> LIBC_INLINE int ctz(T val);
-template <> inline int ctz<unsigned int>(unsigned int val) {
+template <> LIBC_INLINE int ctz<unsigned int>(unsigned int val) {
   return __builtin_ctz(val);
 }
-template <> inline int ctz<unsigned long int>(unsigned long int val) {
+template <> LIBC_INLINE int ctz<unsigned long int>(unsigned long int val) {
   return __builtin_ctzl(val);
 }
-template <> inline int ctz<unsigned long long int>(unsigned long long int val) {
+template <>
+LIBC_INLINE int ctz<unsigned long long int>(unsigned long long int val) {
   return __builtin_ctzll(val);
 }
 } // namespace __internal
@@ -73,7 +75,7 @@ template <typename T> LIBC_INLINE int unsafe_clz(T val) {
 DEFINE_NAMED_PAIR_TEMPLATE(SumCarry, sum, carry);
 
 template <typename T>
-inline constexpr cpp::enable_if_t<
+LIBC_INLINE constexpr cpp::enable_if_t<
     cpp::is_integral_v<T> && cpp::is_unsigned_v<T>, SumCarry<T>>
 add_with_carry(T a, T b, T carry_in) {
   T tmp = a + carry_in;
@@ -82,11 +84,11 @@ add_with_carry(T a, T b, T carry_in) {
   return {sum, carry_out};
 }
 
-#if LLVM_LIBC_HAS_BUILTIN(__builtin_addc)
+#if LIBC_HAS_BUILTIN(__builtin_addc)
 // https://clang.llvm.org/docs/LanguageExtensions.html#multiprecision-arithmetic-builtins
 
 template <>
-inline SumCarry<unsigned char>
+LIBC_INLINE SumCarry<unsigned char>
 add_with_carry<unsigned char>(unsigned char a, unsigned char b,
                               unsigned char carry_in) {
   SumCarry<unsigned char> result{0, 0};
@@ -95,7 +97,7 @@ add_with_carry<unsigned char>(unsigned char a, unsigned char b,
 }
 
 template <>
-inline SumCarry<unsigned short>
+LIBC_INLINE SumCarry<unsigned short>
 add_with_carry<unsigned short>(unsigned short a, unsigned short b,
                                unsigned short carry_in) {
   SumCarry<unsigned short> result{0, 0};
@@ -104,7 +106,7 @@ add_with_carry<unsigned short>(unsigned short a, unsigned short b,
 }
 
 template <>
-inline SumCarry<unsigned int>
+LIBC_INLINE SumCarry<unsigned int>
 add_with_carry<unsigned int>(unsigned int a, unsigned int b,
                              unsigned int carry_in) {
   SumCarry<unsigned int> result{0, 0};
@@ -113,7 +115,7 @@ add_with_carry<unsigned int>(unsigned int a, unsigned int b,
 }
 
 template <>
-inline SumCarry<unsigned long>
+LIBC_INLINE SumCarry<unsigned long>
 add_with_carry<unsigned long>(unsigned long a, unsigned long b,
                               unsigned long carry_in) {
   SumCarry<unsigned long> result{0, 0};
@@ -122,7 +124,7 @@ add_with_carry<unsigned long>(unsigned long a, unsigned long b,
 }
 
 template <>
-inline SumCarry<unsigned long long>
+LIBC_INLINE SumCarry<unsigned long long>
 add_with_carry<unsigned long long>(unsigned long long a, unsigned long long b,
                                    unsigned long long carry_in) {
   SumCarry<unsigned long long> result{0, 0};
@@ -130,13 +132,13 @@ add_with_carry<unsigned long long>(unsigned long long a, unsigned long long b,
   return result;
 }
 
-#endif // LLVM_LIBC_HAS_BUILTIN(__builtin_addc)
+#endif // LIBC_HAS_BUILTIN(__builtin_addc)
 
 // Subtract with borrow
 DEFINE_NAMED_PAIR_TEMPLATE(DiffBorrow, diff, borrow);
 
 template <typename T>
-inline constexpr cpp::enable_if_t<
+LIBC_INLINE constexpr cpp::enable_if_t<
     cpp::is_integral_v<T> && cpp::is_unsigned_v<T>, DiffBorrow<T>>
 sub_with_borrow(T a, T b, T borrow_in) {
   T tmp = a - b;
@@ -145,11 +147,11 @@ sub_with_borrow(T a, T b, T borrow_in) {
   return {diff, borrow_out};
 }
 
-#if LLVM_LIBC_HAS_BUILTIN(__builtin_subc)
+#if LIBC_HAS_BUILTIN(__builtin_subc)
 // https://clang.llvm.org/docs/LanguageExtensions.html#multiprecision-arithmetic-builtins
 
 template <>
-inline DiffBorrow<unsigned char>
+LIBC_INLINE DiffBorrow<unsigned char>
 sub_with_borrow<unsigned char>(unsigned char a, unsigned char b,
                                unsigned char borrow_in) {
   DiffBorrow<unsigned char> result{0, 0};
@@ -158,7 +160,7 @@ sub_with_borrow<unsigned char>(unsigned char a, unsigned char b,
 }
 
 template <>
-inline DiffBorrow<unsigned short>
+LIBC_INLINE DiffBorrow<unsigned short>
 sub_with_borrow<unsigned short>(unsigned short a, unsigned short b,
                                 unsigned short borrow_in) {
   DiffBorrow<unsigned short> result{0, 0};
@@ -167,7 +169,7 @@ sub_with_borrow<unsigned short>(unsigned short a, unsigned short b,
 }
 
 template <>
-inline DiffBorrow<unsigned int>
+LIBC_INLINE DiffBorrow<unsigned int>
 sub_with_borrow<unsigned int>(unsigned int a, unsigned int b,
                               unsigned int borrow_in) {
   DiffBorrow<unsigned int> result{0, 0};
@@ -176,7 +178,7 @@ sub_with_borrow<unsigned int>(unsigned int a, unsigned int b,
 }
 
 template <>
-inline DiffBorrow<unsigned long>
+LIBC_INLINE DiffBorrow<unsigned long>
 sub_with_borrow<unsigned long>(unsigned long a, unsigned long b,
                                unsigned long borrow_in) {
   DiffBorrow<unsigned long> result{0, 0};
@@ -185,7 +187,7 @@ sub_with_borrow<unsigned long>(unsigned long a, unsigned long b,
 }
 
 template <>
-inline DiffBorrow<unsigned long long>
+LIBC_INLINE DiffBorrow<unsigned long long>
 sub_with_borrow<unsigned long long>(unsigned long long a, unsigned long long b,
                                     unsigned long long borrow_in) {
   DiffBorrow<unsigned long long> result{0, 0};
@@ -193,7 +195,7 @@ sub_with_borrow<unsigned long long>(unsigned long long a, unsigned long long b,
   return result;
 }
 
-#endif // LLVM_LIBC_HAS_BUILTIN(__builtin_subc)
+#endif // LIBC_HAS_BUILTIN(__builtin_subc)
 
 } // namespace __llvm_libc
 

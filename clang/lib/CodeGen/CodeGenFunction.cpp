@@ -361,17 +361,18 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   bool HasOnlyLifetimeMarkers =
       HasCleanups && EHStack.containsOnlyLifetimeMarkers(PrologueCleanupDepth);
   bool EmitRetDbgLoc = !HasCleanups || HasOnlyLifetimeMarkers;
+
+  std::optional<ApplyDebugLocation> OAL;
   if (HasCleanups) {
     // Make sure the line table doesn't jump back into the body for
     // the ret after it's been at EndLoc.
-    std::optional<ApplyDebugLocation> AL;
     if (CGDebugInfo *DI = getDebugInfo()) {
       if (OnlySimpleReturnStmts)
         DI->EmitLocation(Builder, EndLoc);
       else
         // We may not have a valid end location. Try to apply it anyway, and
         // fall back to an artificial location if needed.
-        AL = ApplyDebugLocation::CreateDefaultArtificial(*this, EndLoc);
+        OAL = ApplyDebugLocation::CreateDefaultArtificial(*this, EndLoc);
     }
 
     PopCleanupBlocks(PrologueCleanupDepth);
@@ -1103,8 +1104,9 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
     auto AI = CurFn->arg_begin();
     if (CurFnInfo->getReturnInfo().isSRetAfterThis())
       ++AI;
-    ReturnValue = Address(&*AI, ConvertType(RetTy),
-                          CurFnInfo->getReturnInfo().getIndirectAlign());
+    ReturnValue =
+        Address(&*AI, ConvertType(RetTy),
+                CurFnInfo->getReturnInfo().getIndirectAlign(), KnownNonNull);
     if (!CurFnInfo->getReturnInfo().getIndirectByVal()) {
       ReturnValuePointer =
           CreateDefaultAlignTempAlloca(Int8PtrTy, "result.ptr");
@@ -1124,8 +1126,8 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
         cast<llvm::GetElementPtrInst>(Addr)->getResultElementType();
     ReturnValuePointer = Address(Addr, Ty, getPointerAlign());
     Addr = Builder.CreateAlignedLoad(Ty, Addr, getPointerAlign(), "agg.result");
-    ReturnValue =
-        Address(Addr, ConvertType(RetTy), CGM.getNaturalTypeAlignment(RetTy));
+    ReturnValue = Address(Addr, ConvertType(RetTy),
+                          CGM.getNaturalTypeAlignment(RetTy), KnownNonNull);
   } else {
     ReturnValue = CreateIRTemp(RetTy, "retval");
 

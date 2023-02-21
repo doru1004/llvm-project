@@ -92,7 +92,7 @@ void RTLsTy::loadRTLs() {
 
   DP("Loading RTLs...\n");
 
-  BoolEnvar NextGenPlugins("LIBOMPTARGET_NEXTGEN_PLUGINS", false);
+  BoolEnvar NextGenPlugins("LIBOMPTARGET_NEXTGEN_PLUGINS", true);
 
   // Attempt to open all the plugins and, if they exist, check if the interface
   // is correct and if they are supporting any devices.
@@ -246,6 +246,10 @@ bool RTLsTy::attemptLoadRTL(const std::string &RTLName, RTLInfoTy &RTL) {
       DynLibrary->getAddressOfSymbol("__tgt_rtl_data_lock");
   *((void **)&RTL.data_unlock) =
       DynLibrary->getAddressOfSymbol("__tgt_rtl_data_unlock");
+  *((void **)&RTL.data_notify_mapped) =
+      DynLibrary->getAddressOfSymbol("__tgt_rtl_data_notify_mapped");
+  *((void **)&RTL.data_notify_unmapped) =
+      DynLibrary->getAddressOfSymbol("__tgt_rtl_data_notify_unmapped");
 
   RTL.LibraryHandler = std::move(DynLibrary);
 

@@ -215,6 +215,22 @@ struct GenELF64DeviceTy : public GenericDeviceTy {
     return OFFLOAD_SUCCESS;
   }
 
+  /// This plugin does nothing to lock buffers. Do not return an error, just
+  /// return the same pointer as the device pointer.
+  Expected<void *> dataLockImpl(void *HstPtr, int64_t Size) override {
+    return HstPtr;
+  }
+
+  /// Nothing to do when unlocking the buffer.
+  Error dataUnlockImpl(void *HstPtr) override { return Plugin::success(); }
+
+  /// Indicate that the buffer is not pinned.
+  Expected<bool> isPinnedPtrImpl(void *HstPtr, void *&BaseHstPtr,
+                                 void *&BaseDevAccessiblePtr,
+                                 size_t &BaseSize) const override {
+    return false;
+  }
+
   /// Submit data to the device (host to device transfer).
   Error dataSubmitImpl(void *TgtPtr, const void *HstPtr, int64_t Size,
                        AsyncInfoWrapperTy &AsyncInfoWrapper) override {

@@ -902,8 +902,7 @@ Preprocessor::getHeaderToIncludeForDiagnostics(SourceLocation IncLoc,
       // If we have a module import syntax, we shouldn't include a header to
       // make a particular module visible. Let the caller know they should
       // suggest an import instead.
-      if (getLangOpts().ObjC || getLangOpts().CPlusPlusModules ||
-          getLangOpts().ModulesTS)
+      if (getLangOpts().ObjC || getLangOpts().CPlusPlusModules)
         return nullptr;
 
       // If this is an accessible, non-textual header of M's top-level module
@@ -1999,6 +1998,10 @@ OptionalFileEntryRef Preprocessor::LookupHeaderIncludeOrImport(
       &SuggestedModule, &IsMapped, &IsFrameworkFound);
   if (File)
     return File;
+
+  // Give the clients a chance to silently skip this include.
+  if (Callbacks && Callbacks->FileNotFound(Filename))
+    return std::nullopt;
 
   if (SuppressIncludeNotFoundError)
     return std::nullopt;

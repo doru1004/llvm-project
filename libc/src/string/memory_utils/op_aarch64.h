@@ -13,9 +13,9 @@
 #ifndef LLVM_LIBC_SRC_STRING_MEMORY_UTILS_OP_AARCH64_H
 #define LLVM_LIBC_SRC_STRING_MEMORY_UTILS_OP_AARCH64_H
 
-#include "src/__support/architectures.h"
+#include "src/__support/macros/properties/architectures.h"
 
-#if defined(LLVM_LIBC_ARCH_AARCH64)
+#if defined(LIBC_TARGET_ARCH_IS_AARCH64)
 
 #include "src/__support/common.h"
 #include "src/string/memory_utils/op_generic.h"
@@ -55,7 +55,7 @@ template <size_t Size> struct BzeroCacheLine {
   }
 };
 
-inline static bool hasZva() {
+LIBC_INLINE static bool hasZva() {
   uint64_t zva_val;
   asm("mrs %[zva_val], dczid_el0" : [zva_val] "=r"(zva_val));
   // DC ZVA is permitted if DZP, bit [4] is zero.
@@ -174,6 +174,6 @@ template <size_t Size> struct Bcmp {
 
 } // namespace __llvm_libc::aarch64
 
-#endif // LLVM_LIBC_ARCH_AARCH64
+#endif // LIBC_TARGET_ARCH_IS_AARCH64
 
 #endif // LLVM_LIBC_SRC_STRING_MEMORY_UTILS_OP_AARCH64_H

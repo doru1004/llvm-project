@@ -716,14 +716,16 @@ to over-align the global if the global has an assigned section. In this
 case, the extra alignment could be observable: for example, code could
 assume that the globals are densely packed in their section and try to
 iterate over them as an array, alignment padding would break this
-iteration. The maximum alignment is ``1 << 32``.
+iteration. For TLS variables, the module flag ``MaxTLSAlign``, if present,
+limits the alignment to the given value. Optimizers are not allowed to
+impose a stronger alignment on these variables. The maximum alignment
+is ``1 << 32``.
 
-For global variables declarations, as well as definitions that may be
+For global variable declarations, as well as definitions that may be
 replaced at link time (``linkonce``, ``weak``, ``extern_weak`` and ``common``
-linkage types), LLVM makes no assumptions about the allocation size of the
-variables, except that they may not overlap. The alignment of a global variable
-declaration or replaceable definition must not be greater than the alignment of
-the definition it resolves to.
+linkage types), the allocation size and alignment of the definition it resolves
+to must be greater than or equal to that of the declaration or replaceable
+definition, otherwise the behavior is undefined.
 
 Globals can also have a :ref:`DLL storage class <dllstorageclass>`,
 an optional :ref:`runtime preemption specifier <runtime_preemption_model>`,
@@ -3282,15 +3284,17 @@ seq\_cst total orderings of other operations that are not marked
 Floating-Point Environment
 --------------------------
 
-The default LLVM floating-point environment assumes that floating-point
-instructions do not have side effects. Results assume the round-to-nearest
-rounding mode. No floating-point exception state is maintained in this
-environment. Therefore, there is no attempt to create or preserve invalid
-operation (SNaN) or division-by-zero exceptions.
+The default LLVM floating-point environment assumes that traps are disabled and
+status flags are not observable. Therefore, floating-point math operations do
+not have side effects and may be speculated freely. Results assume the
+round-to-nearest rounding mode.
 
-The benefit of this exception-free assumption is that floating-point
-operations may be speculated freely without any other fast-math relaxations
-to the floating-point model.
+Floating-point math operations are allowed to treat all NaNs as if they were
+quiet NaNs. For example, "pow(1.0, SNaN)" may be simplified to 1.0. This also
+means that SNaN may be passed through a math operation without quieting. For
+example, "fmul SNaN, 1.0" may be simplified to SNaN rather than QNaN. However,
+SNaN values are never created by math operations. They may only occur when
+provided as a program input value.
 
 Code that requires different behavior than this should use the
 :ref:`Constrained Floating-Point Intrinsics <constrainedfp>`.
@@ -5772,11 +5776,12 @@ retained, even if their IR counterparts are optimized out of the IR. The
 
 .. _DISubprogramDeclaration:
 
-When ``isDefinition: false``, subprograms describe a declaration in the type
-tree as opposed to a definition of a function.  If the scope is a composite
-type with an ODR ``identifier:`` and that does not set ``flags: DIFwdDecl``,
-then the subprogram declaration is uniqued based only on its ``linkageName:``
-and ``scope:``.
+When ``spFlags: DISPFlagDefinition`` is not present, subprograms describe a
+declaration in the type tree as opposed to a definition of a function. In this
+case, the ``declaration`` field must be empty. If the scope is a composite type
+with an ODR ``identifier:`` and that does not set ``flags: DIFwdDecl``, then
+the subprogram declaration is uniqued based only on its ``linkageName:`` and
+``scope:``.
 
 .. code-block:: text
 
@@ -5785,9 +5790,9 @@ and ``scope:``.
     }
 
     !0 = distinct !DISubprogram(name: "foo", linkageName: "_Zfoov", scope: !1,
-                                file: !2, line: 7, type: !3, isLocal: true,
-                                isDefinition: true, scopeLine: 8,
-                                containingType: !4,
+                                file: !2, line: 7, type: !3,
+                                spFlags: DISPFlagDefinition | DISPFlagLocalToUnit,
+                                scopeLine: 8, containingType: !4,
                                 virtuality: DW_VIRTUALITY_pure_virtual,
                                 virtualIndex: 10, flags: DIFlagPrototyped,
                                 isOptimized: true, unit: !5, templateParams: !6,
@@ -8536,6 +8541,14 @@ function, with the possibility of control flow transfer to either the
 This instruction should only be used to implement the "goto" feature of gcc
 style inline assembly. Any other usage is an error in the IR verifier.
 
+Note that in order to support outputs along indirect edges, LLVM may need to
+split critical edges, which may require synthesizing a replacement block for
+the ``indirect labels``. Therefore, the address of a label as seen by another
+``callbr`` instruction, or for a :ref:`blockaddress <blockaddress>` constant,
+may not be equal to the address provided for the same block to this
+instruction's ``indirect labels`` operand. The assembly code may only transfer
+control to addresses provided via this instruction's ``indirect labels``.
+
 Arguments:
 """"""""""
 
@@ -10078,11 +10091,15 @@ The '``alloca``' instruction allocates ``sizeof(<type>)*NumElements``
 bytes of memory on the runtime stack, returning a pointer of the
 appropriate type to the program. If "NumElements" is specified, it is
 the number of elements allocated, otherwise "NumElements" is defaulted
-to be one. If a constant alignment is specified, the value result of the
+to be one.
+
+If a constant alignment is specified, the value result of the
 allocation is guaranteed to be aligned to at least that boundary. The
-alignment may not be greater than ``1 << 32``. If not specified, or if
-zero, the target can choose to align the allocation on any convenient
-boundary compatible with the type.
+alignment may not be greater than ``1 << 32``.
+
+The alignment is only optional when parsing textual IR; for in-memory IR,
+it is always present. If not specified, the target can choose to align the
+allocation on any convenient boundary compatible with the type.
 
 '``type``' may be any sized type.
 
@@ -10164,18 +10181,20 @@ alignment is not set to a value which is at least the size in bytes of the
 pointee. ``!nontemporal`` does not have any defined semantics for atomic loads.
 
 The optional constant ``align`` argument specifies the alignment of the
-operation (that is, the alignment of the memory address). A value of 0
-or an omitted ``align`` argument means that the operation has the ABI
-alignment for the target. It is the responsibility of the code emitter
-to ensure that the alignment information is correct. Overestimating the
-alignment results in undefined behavior. Underestimating the alignment
-may produce less efficient code. An alignment of 1 is always safe. The
-maximum possible alignment is ``1 << 32``. An alignment value higher
-than the size of the loaded type implies memory up to the alignment
-value bytes can be safely loaded without trapping in the default
-address space. Access of the high bytes can interfere with debugging
-tools, so should not be accessed if the function has the
-``sanitize_thread`` or ``sanitize_address`` attributes.
+operation (that is, the alignment of the memory address). It is the 
+responsibility of the code emitter to ensure that the alignment information is
+correct. Overestimating the alignment results in undefined behavior. 
+Underestimating the alignment may produce less efficient code. An alignment of
+1 is always safe. The maximum possible alignment is ``1 << 32``. An alignment 
+value higher than the size of the loaded type implies memory up to the
+alignment value bytes can be safely loaded without trapping in the default
+address space. Access of the high bytes can interfere with debugging tools, so
+should not be accessed if the function has the ``sanitize_thread`` or
+``sanitize_address`` attributes.
+
+The alignment is only optional when parsing textual IR; for in-memory IR, it is
+always present. An omitted ``align`` argument means that the operation has the
+ABI alignment for the target.
 
 The optional ``!nontemporal`` metadata must reference a single
 metadata name ``<nontemp_node>`` corresponding to a metadata node with one
@@ -10302,20 +10321,20 @@ the alignment is not set to a value which is at least the size in bytes of the
 pointee. ``!nontemporal`` does not have any defined semantics for atomic stores.
 
 The optional constant ``align`` argument specifies the alignment of the
-operation (that is, the alignment of the memory address). A value of 0
-or an omitted ``align`` argument means that the operation has the ABI
-alignment for the target. It is the responsibility of the code emitter
-to ensure that the alignment information is correct. Overestimating the
-alignment results in undefined behavior. Underestimating the
-alignment may produce less efficient code. An alignment of 1 is always
-safe. The maximum possible alignment is ``1 << 32``. An alignment
-value higher than the size of the stored type implies memory up to the
-alignment value bytes can be stored to without trapping in the default
-address space. Storing to the higher bytes however may result in data
-races if another thread can access the same address. Introducing a
-data race is not allowed. Storing to the extra bytes is not allowed
-even in situations where a data race is known to not exist if the
-function has the ``sanitize_address`` attribute.
+operation (that is, the alignment of the memory address). It is the 
+responsibility of the code emitter to ensure that the alignment information is
+correct. Overestimating the alignment results in undefined behavior. 
+Underestimating the alignment may produce less efficient code. An alignment of
+1 is always safe. The maximum possible alignment is ``1 << 32``. An alignment 
+value higher than the size of the loaded type implies memory up to the
+alignment value bytes can be safely loaded without trapping in the default
+address space. Access of the high bytes can interfere with debugging tools, so
+should not be accessed if the function has the ``sanitize_thread`` or
+``sanitize_address`` attributes.
+
+The alignment is only optional when parsing textual IR; for in-memory IR, it is
+always present. An omitted ``align`` argument means that the operation has the
+ABI alignment for the target.
 
 The optional ``!nontemporal`` metadata must reference a single metadata
 name ``<nontemp_node>`` corresponding to a metadata node with one ``i32`` entry
@@ -10449,9 +10468,11 @@ must be at least ``monotonic``, the failure ordering cannot be either
 A ``cmpxchg`` instruction can also take an optional
 ":ref:`syncscope <syncscope>`" argument.
 
-The instruction can take an optional ``align`` attribute.
 The alignment must be a power of two greater or equal to the size of the
-`<value>` type. If unspecified, the alignment is assumed to be equal to the
+`<value>` type.
+
+The alignment is only optional when parsing textual IR; for in-memory IR, it is
+always present. If unspecified, the alignment is assumed to be equal to the
 size of the '<value>' type. Note that this default alignment assumption is
 different from the alignment used for the load/store instructions when align
 isn't specified.
@@ -10537,6 +10558,8 @@ operation. The operation must be one of the following keywords:
 -  fsub
 -  fmax
 -  fmin
+-  uinc_wrap
+-  udec_wrap
 
 For most of these operations, the type of '<value>' must be an integer
 type whose bit width is a power of two greater than or equal to eight
@@ -10548,9 +10571,11 @@ the ``atomicrmw`` is marked as ``volatile``, then the optimizer is not
 allowed to modify the number or order of execution of this
 ``atomicrmw`` with other :ref:`volatile operations <volatile>`.
 
-The instruction can take an optional ``align`` attribute.
 The alignment must be a power of two greater or equal to the size of the
-`<value>` type. If unspecified, the alignment is assumed to be equal to the
+`<value>` type.
+
+The alignment is only optional when parsing textual IR; for in-memory IR, it is
+always present. If unspecified, the alignment is assumed to be equal to the
 size of the '<value>' type. Note that this default alignment assumption is
 different from the alignment used for the load/store instructions when align
 isn't specified.
@@ -10581,6 +10606,9 @@ operation argument:
 - fsub: ``*ptr = *ptr - val`` (using floating point arithmetic)
 -  fmax: ``*ptr = maxnum(*ptr, val)`` (match the `llvm.maxnum.*`` intrinsic)
 -  fmin: ``*ptr = minnum(*ptr, val)`` (match the `llvm.minnum.*`` intrinsic)
+-  uinc_wrap: ``*ptr = (*ptr u>= val) ? 0 : (*ptr + 1)`` (increment value with wraparound to zero when incremented above input value)
+-  udec_wrap: ``*ptr = ((*ptr == 0) || (*ptr u> val)) ? val : (*ptr - 1)`` (decrement with wraparound to input value when decremented below zero).
+
 
 Example:
 """"""""
@@ -15526,7 +15554,7 @@ support all bit widths or vector types, however.
 ::
 
       declare i8  @llvm.fshl.i8 (i8 %a, i8 %b, i8 %c)
-      declare i67 @llvm.fshl.i67(i67 %a, i67 %b, i67 %c)
+      declare i64 @llvm.fshl.i64(i64 %a, i64 %b, i64 %c)
       declare <2 x i32> @llvm.fshl.v2i32(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c)
 
 Overview:
@@ -15574,7 +15602,7 @@ support all bit widths or vector types, however.
 ::
 
       declare i8  @llvm.fshr.i8 (i8 %a, i8 %b, i8 %c)
-      declare i67 @llvm.fshr.i67(i67 %a, i67 %b, i67 %c)
+      declare i64 @llvm.fshr.i64(i64 %a, i64 %b, i64 %c)
       declare <2 x i32> @llvm.fshr.v2i32(<2 x i32> %a, <2 x i32> %b, <2 x i32> %c)
 
 Overview:
@@ -17673,6 +17701,75 @@ Arguments:
 """"""""""
 
 The argument to this intrinsic must be a vector.
+
+'``llvm.experimental.vector.deinterleave2``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic.
+
+::
+
+      declare {<2 x double>, <2 x double>} @llvm.experimental.vector.deinterleave2.v4f64(<4 x double> %vec1)
+      declare {<vscale x 4 x i32>, <vscale x 4 x i32>}  @llvm.experimental.vector.deinterleave2.nxv8i32(<vscale x 8 x i32> %vec1)
+
+Overview:
+"""""""""
+
+The '``llvm.experimental.vector.deinterleave2``' intrinsic constructs two
+vectors by deinterleaving the even and odd lanes of the input vector.
+
+This intrinsic works for both fixed and scalable vectors. While this intrinsic
+supports all vector types the recommended way to express this operation for
+fixed-width vectors is still to use a shufflevector, as that may allow for more
+optimization opportunities.
+
+For example:
+
+.. code-block:: text
+
+  {<2 x i64>, <2 x i64>} llvm.experimental.vector.deinterleave2.v4i64(<4 x i64> <i64 0, i64 1, i64 2, i64 3>); ==> {<2 x i64> <i64 0, i64 2>, <2 x i64> <i64 1, i64 3>}
+
+Arguments:
+""""""""""
+
+The argument is a vector whose type corresponds to the logical concatenation of
+the two result types.
+
+'``llvm.experimental.vector.interleave2``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+This is an overloaded intrinsic.
+
+::
+
+      declare <4 x double> @llvm.experimental.vector.interleave2.v4f64(<2 x double> %vec1, <2 x double> %vec2)
+      declare <vscale x 8 x i32> @llvm.experimental.vector.interleave2.nxv8i32(<vscale x 4 x i32> %vec1, <vscale x 4 x i32> %vec2)
+
+Overview:
+"""""""""
+
+The '``llvm.experimental.vector.interleave2``' intrinsic constructs a vector
+by interleaving two input vectors.
+
+This intrinsic works for both fixed and scalable vectors. While this intrinsic
+supports all vector types the recommended way to express this operation for
+fixed-width vectors is still to use a shufflevector, as that may allow for more
+optimization opportunities.
+
+For example:
+
+.. code-block:: text
+
+   <4 x i64> llvm.experimental.vector.interleave2.v4i64(<2 x i64> <i64 0, i64 2>, <2 x i64> <i64 1, i64 3>); ==> <4 x i64> <i64 0, i64 1, i64 2, i64 3>
+
+Arguments:
+""""""""""
+Both arguments must be vectors of the same type whereby their logical
+concatenation matches the result type.
 
 '``llvm.experimental.vector.splice``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -24955,7 +25052,12 @@ if the element value satisfies the specified test. The argument ``test`` is a
 bit mask where each bit specifies floating-point class to test. For example, the
 value 0x108 makes test for normal value, - bits 3 and 8 in it are set, which
 means that the function returns ``true`` if ``op`` is a positive or negative
-normal value. The function never raises floating-point exceptions.
+normal value. The function never raises floating-point exceptions. The
+function does not canonicalize its input value and does not depend
+on the floating-point environment. If the floating-point environment
+has a zeroing treatment of subnormal input values (such as indicated
+by the ``"denormal-fp-math"`` attribute), a subnormal value will be
+observed (will not be implicitly treated as zero).
 
 
 General Intrinsics

@@ -32,7 +32,7 @@ STATISTIC(NumDeadStore, "Number of dead stores eliminated");
 STATISTIC(NumGlobalCopies, "Number of allocas copied from constant global");
 
 static cl::opt<unsigned> MaxCopiedFromConstantUsers(
-    "instcombine-max-copied-from-constant-users", cl::init(128),
+    "instcombine-max-copied-from-constant-users", cl::init(300),
     cl::desc("Maximum users to visit in copy from constant transform"),
     cl::Hidden);
 
@@ -72,14 +72,14 @@ isOnlyCopiedFromConstantMemory(AAResults *AA, AllocaInst *V,
         continue;
       }
 
-      if (isa<PHINode>(I)) {
+      if (isa<PHINode, SelectInst>(I)) {
         // We set IsOffset=true, to forbid the memcpy from occurring after the
         // phi: If one of the phi operands is not based on the alloca, we
         // would incorrectly omit a write.
         Worklist.emplace_back(I, true);
         continue;
       }
-      if (isa<BitCastInst>(I) || isa<AddrSpaceCastInst>(I)) {
+      if (isa<BitCastInst, AddrSpaceCastInst>(I)) {
         // If uses of the bitcast are ok, we are ok.
         Worklist.emplace_back(I, IsOffset);
         continue;
@@ -320,6 +320,19 @@ bool PointerReplacer::collectUsersRecursive(Instruction &I) {
       Worklist.insert(PHI);
       if (!collectUsersRecursive(*PHI))
         return false;
+    } else if (auto *SI = dyn_cast<SelectInst>(Inst)) {
+      if (!isa<Instruction>(SI->getTrueValue()) ||
+          !isa<Instruction>(SI->getFalseValue()))
+        return false;
+
+      if (!isAvailable(cast<Instruction>(SI->getTrueValue())) ||
+          !isAvailable(cast<Instruction>(SI->getFalseValue()))) {
+        ValuesToRevisit.insert(Inst);
+        continue;
+      }
+      Worklist.insert(SI);
+      if (!collectUsersRecursive(*SI))
+        return false;
     } else if (isa<GetElementPtrInst, BitCastInst>(Inst)) {
       Worklist.insert(Inst);
       if (!collectUsersRecursive(*Inst))
@@ -385,6 +398,13 @@ void PointerReplacer::replace(Instruction *I) {
     IC.InsertNewInstWith(NewI, *BC);
     NewI->takeName(BC);
     WorkMap[BC] = NewI;
+  } else if (auto *SI = dyn_cast<SelectInst>(I)) {
+    auto *NewSI = SelectInst::Create(
+        SI->getCondition(), getReplacement(SI->getTrueValue()),
+        getReplacement(SI->getFalseValue()), SI->getName(), nullptr, SI);
+    IC.InsertNewInstWith(NewSI, *SI);
+    NewSI->takeName(SI);
+    WorkMap[SI] = NewSI;
   } else if (auto *MemCpy = dyn_cast<MemTransferInst>(I)) {
     auto *SrcV = getReplacement(MemCpy->getRawSource());
     // The pointer may appear in the destination of a copy, but we don't want to
@@ -1004,6 +1024,8 @@ static bool canSimplifyNullLoadOrGEP(LoadInst &LI, Value *Op) {
 
 Instruction *InstCombinerImpl::visitLoadInst(LoadInst &LI) {
   Value *Op = LI.getOperand(0);
+  if (Value *Res = simplifyLoadInst(&LI, Op, SQ.getWithInstruction(&LI)))
+    return replaceInstUsesWith(LI, Res);
 
   // Try to canonicalize the loaded type.
   if (Instruction *Res = combineLoadToOperationType(*this, LI))

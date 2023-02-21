@@ -954,7 +954,7 @@ SDValue R600TargetLowering::lowerADDRSPACECAST(SDValue Op,
   unsigned DestAS = ASC->getDestAddressSpace();
 
   if (auto *ConstSrc = dyn_cast<ConstantSDNode>(Op.getOperand(0))) {
-    if (SrcAS == AMDGPUAS::FLAT_ADDRESS && ConstSrc->isNullValue())
+    if (SrcAS == AMDGPUAS::FLAT_ADDRESS && ConstSrc->isZero())
       return DAG.getConstant(TM.getNullPointerValue(DestAS), SL, VT);
   }
 
@@ -1511,7 +1511,7 @@ SDValue R600TargetLowering::LowerFormalArguments(
     // size of the register which isn't useful.
 
     unsigned PartOffset = VA.getLocMemOffset();
-    unsigned Alignment = MinAlign(VT.getStoreSize(), PartOffset);
+    Align Alignment = commonAlignment(Align(VT.getStoreSize()), PartOffset);
 
     MachinePointerInfo PtrInfo(AMDGPUAS::PARAM_I_ADDRESS);
     SDValue Arg = DAG.getLoad(
@@ -2181,4 +2181,19 @@ SDNode *R600TargetLowering::PostISelFolding(MachineSDNode *Node,
   }
 
   return Node;
+}
+
+TargetLowering::AtomicExpansionKind
+R600TargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *RMW) const {
+  switch (RMW->getOperation()) {
+  case AtomicRMWInst::UIncWrap:
+  case AtomicRMWInst::UDecWrap:
+    // FIXME: Cayman at least appears to have instructions for this, but the
+    // instruction defintions appear to be missing.
+    return AtomicExpansionKind::CmpXChg;
+  default:
+    break;
+  }
+
+  return AMDGPUTargetLowering::shouldExpandAtomicRMWInIR(RMW);
 }

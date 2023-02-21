@@ -1557,6 +1557,7 @@ struct EmboxCommonConversion : public FIROpConversion<OP> {
     auto llvmBoxPtrTy = convTy.template cast<mlir::LLVM::LLVMPointerType>();
     auto llvmBoxTy = llvmBoxPtrTy.getElementType();
     bool isUnlimitedPolymorphic = fir::isUnlimitedPolymorphicType(boxTy);
+    bool useInputType = fir::isPolymorphicType(boxTy) || isUnlimitedPolymorphic;
     mlir::Value descriptor =
         rewriter.create<mlir::LLVM::UndefOp>(loc, llvmBoxTy);
     descriptor =
@@ -1577,7 +1578,7 @@ struct EmboxCommonConversion : public FIROpConversion<OP> {
     if (hasAddendum) {
       unsigned typeDescFieldId = getTypeDescFieldId(boxTy);
       if (!typeDesc) {
-        if (isUnlimitedPolymorphic) {
+        if (useInputType) {
           mlir::Type innerType = fir::unwrapInnerType(inputType);
           if (innerType && innerType.template isa<fir::RecordType>()) {
             auto recTy = innerType.template dyn_cast<fir::RecordType>();
@@ -1660,7 +1661,7 @@ struct EmboxCommonConversion : public FIROpConversion<OP> {
         getSizeAndTypeCode(loc, rewriter, boxTy.getEleTy(), typeparams);
 
     // Reboxing to a polymorphic entity. eleSize and type code need to
-    // be retrived from the initial box and propagated to the new box.
+    // be retrieved from the initial box and propagated to the new box.
     // If the initial box has an addendum, the type desc must be propagated as
     // well.
     if (fir::isPolymorphicType(boxTy)) {
@@ -2944,14 +2945,32 @@ struct FirEndOpConversion : public FIROpConversion<fir::FirEndOp> {
   }
 };
 
-/// Lower `fir.gentypedesc` to a global constant.
-struct GenTypeDescOpConversion : public FIROpConversion<fir::GenTypeDescOp> {
+/// Lower `fir.type_desc` to a global addr.
+struct TypeDescOpConversion : public FIROpConversion<fir::TypeDescOp> {
   using FIROpConversion::FIROpConversion;
 
   mlir::LogicalResult
-  matchAndRewrite(fir::GenTypeDescOp gentypedesc, OpAdaptor adaptor,
+  matchAndRewrite(fir::TypeDescOp typeDescOp, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
-    TODO(gentypedesc.getLoc(), "fir.gentypedesc codegen");
+    mlir::Type inTy = typeDescOp.getInType();
+    assert(inTy.isa<fir::RecordType>() && "expecting fir.type");
+    auto recordType = inTy.dyn_cast<fir::RecordType>();
+    auto module = typeDescOp.getOperation()->getParentOfType<mlir::ModuleOp>();
+    std::string typeDescName =
+        fir::NameUniquer::getTypeDescriptorName(recordType.getName());
+    if (auto global = module.lookupSymbol<mlir::LLVM::GlobalOp>(typeDescName)) {
+      auto ty = mlir::LLVM::LLVMPointerType::get(
+          this->lowerTy().convertType(global.getType()));
+      rewriter.replaceOpWithNewOp<mlir::LLVM::AddressOfOp>(typeDescOp, ty,
+                                                           global.getSymName());
+      return mlir::success();
+    } else if (auto global = module.lookupSymbol<fir::GlobalOp>(typeDescName)) {
+      auto ty = mlir::LLVM::LLVMPointerType::get(
+          this->lowerTy().convertType(global.getType()));
+      rewriter.replaceOpWithNewOp<mlir::LLVM::AddressOfOp>(typeDescOp, ty,
+                                                           global.getSymName());
+      return mlir::success();
+    }
     return mlir::failure();
   }
 };
@@ -3790,15 +3809,15 @@ public:
         DispatchOpConversion, DispatchTableOpConversion, DTEntryOpConversion,
         DivcOpConversion, EmboxOpConversion, EmboxCharOpConversion,
         EmboxProcOpConversion, ExtractValueOpConversion, FieldIndexOpConversion,
-        FirEndOpConversion, FreeMemOpConversion, GenTypeDescOpConversion,
-        GlobalLenOpConversion, GlobalOpConversion, HasValueOpConversion,
-        InsertOnRangeOpConversion, InsertValueOpConversion,
-        IsPresentOpConversion, LenParamIndexOpConversion, LoadOpConversion,
-        MulcOpConversion, NegcOpConversion, NoReassocOpConversion,
-        SelectCaseOpConversion, SelectOpConversion, SelectRankOpConversion,
-        SelectTypeOpConversion, ShapeOpConversion, ShapeShiftOpConversion,
-        ShiftOpConversion, SliceOpConversion, StoreOpConversion,
-        StringLitOpConversion, SubcOpConversion, UnboxCharOpConversion,
+        FirEndOpConversion, FreeMemOpConversion, GlobalLenOpConversion,
+        GlobalOpConversion, HasValueOpConversion, InsertOnRangeOpConversion,
+        InsertValueOpConversion, IsPresentOpConversion,
+        LenParamIndexOpConversion, LoadOpConversion, MulcOpConversion,
+        NegcOpConversion, NoReassocOpConversion, SelectCaseOpConversion,
+        SelectOpConversion, SelectRankOpConversion, SelectTypeOpConversion,
+        ShapeOpConversion, ShapeShiftOpConversion, ShiftOpConversion,
+        SliceOpConversion, StoreOpConversion, StringLitOpConversion,
+        SubcOpConversion, TypeDescOpConversion, UnboxCharOpConversion,
         UnboxProcOpConversion, UndefOpConversion, UnreachableOpConversion,
         XArrayCoorOpConversion, XEmboxOpConversion, XReboxOpConversion,
         ZeroOpConversion>(typeConverter, options, bindingTables);
@@ -3810,7 +3829,7 @@ public:
     // Convert math-like dialect operations, which can be produced
     // when late math lowering mode is used, into llvm dialect.
     mlir::populateMathToLLVMConversionPatterns(typeConverter, pattern);
-    mlir::populateMathToLibmConversionPatterns(pattern, /*benefit=*/0);
+    mlir::populateMathToLibmConversionPatterns(pattern);
     mlir::populateComplexToLLVMConversionPatterns(typeConverter, pattern);
     mlir::ConversionTarget target{*context};
     target.addLegalDialect<mlir::LLVM::LLVMDialect>();

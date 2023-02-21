@@ -620,6 +620,11 @@ def int_call_preallocated_setup : DefaultAttrsIntrinsic<[llvm_token_ty], [llvm_i
 def int_call_preallocated_arg : DefaultAttrsIntrinsic<[llvm_ptr_ty], [llvm_token_ty, llvm_i32_ty]>;
 def int_call_preallocated_teardown : DefaultAttrsIntrinsic<[], [llvm_token_ty]>;
 
+// This intrinsic is intentionally undocumented and users shouldn't call it;
+// it's produced then quickly consumed during codegen.
+def int_callbr_landingpad : Intrinsic<[llvm_any_ty], [LLVMMatchType<0>],
+                                      [IntrNoMerge]>;
+
 //===------------------- Standard C Library Intrinsics --------------------===//
 //
 
@@ -2115,6 +2120,17 @@ def int_vector_insert : DefaultAttrsIntrinsic<[llvm_anyvector_ty],
 def int_vector_extract : DefaultAttrsIntrinsic<[llvm_anyvector_ty],
                                                [llvm_anyvector_ty, llvm_i64_ty],
                                                [IntrNoMem, IntrSpeculatable, ImmArg<ArgIndex<1>>]>;
+
+
+def int_experimental_vector_interleave2   : DefaultAttrsIntrinsic<[llvm_anyvector_ty],
+                                                                  [LLVMHalfElementsVectorType<0>,
+                                                                   LLVMHalfElementsVectorType<0>],
+                                                                  [IntrNoMem]>;
+
+def int_experimental_vector_deinterleave2 : DefaultAttrsIntrinsic<[LLVMHalfElementsVectorType<0>,
+                                                                   LLVMHalfElementsVectorType<0>],
+                                                                  [llvm_anyvector_ty],
+                                                                  [IntrNoMem]>;
 
 //===----------------- Pointer Authentication Intrinsics ------------------===//
 //

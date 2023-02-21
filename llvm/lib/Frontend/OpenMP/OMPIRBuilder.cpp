@@ -571,7 +571,7 @@ Constant *OpenMPIRBuilder::getOrCreateIdent(Constant *SrcLocStr,
 
     // Look for existing encoding of the location + flags, not needed but
     // minimizes the difference to the existing solution while we transition.
-    for (GlobalVariable &GV : M.getGlobalList())
+    for (GlobalVariable &GV : M.globals())
       if (GV.getValueType() == OpenMPIRBuilder::Ident && GV.hasInitializer())
         if (GV.getInitializer() == Initializer)
           Ident = &GV;
@@ -601,7 +601,7 @@ Constant *OpenMPIRBuilder::getOrCreateSrcLocStr(StringRef LocStr,
 
     // Look for existing encoding of the location, not needed but minimizes the
     // difference to the existing solution while we transition.
-    for (GlobalVariable &GV : M.getGlobalList())
+    for (GlobalVariable &GV : M.globals())
       if (GV.isConstant() && GV.hasInitializer() &&
           GV.getInitializer() == Initializer)
         return SrcLocStr = ConstantExpr::getPointerCast(&GV, Int8Ptr);
@@ -3053,6 +3053,23 @@ void OpenMPIRBuilder::createIfVersion(CanonicalLoopInfo *CanonicalLoop,
   Builder.CreateBr(NewBlocks.front());
 }
 
+unsigned
+OpenMPIRBuilder::getOpenMPDefaultSimdAlign(const Triple &TargetTriple,
+                                           const StringMap<bool> &Features) {
+  if (TargetTriple.isX86()) {
+    if (Features.lookup("avx512f"))
+      return 512;
+    else if (Features.lookup("avx"))
+      return 256;
+    return 128;
+  }
+  if (TargetTriple.isPPC())
+    return 128;
+  if (TargetTriple.isWasm())
+    return 128;
+  return 0;
+}
+
 void OpenMPIRBuilder::applySimd(CanonicalLoopInfo *CanonicalLoop,
                                 MapVector<Value *, Value *> AlignedVars,
                                 Value *IfCond, OrderKind Order,
@@ -4348,6 +4365,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createAtomicUpdate(
   return Builder.saveIP();
 }
 
+// FIXME: Duplicating AtomicExpand
 Value *OpenMPIRBuilder::emitRMWOpAsInstruction(Value *Src1, Value *Src2,
                                                AtomicRMWInst::BinOp RMWOp) {
   switch (RMWOp) {
@@ -4373,6 +4391,8 @@ Value *OpenMPIRBuilder::emitRMWOpAsInstruction(Value *Src1, Value *Src2,
   case AtomicRMWInst::UMin:
   case AtomicRMWInst::FMax:
   case AtomicRMWInst::FMin:
+  case AtomicRMWInst::UIncWrap:
+  case AtomicRMWInst::UDecWrap:
     llvm_unreachable("Unsupported atomic update operation");
   }
   llvm_unreachable("Unsupported atomic update operation");

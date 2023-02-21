@@ -4,8 +4,9 @@ add_header_library(
     FEnvImpl.h
   DEPENDS
     libc.include.fenv
-    libc.src.__support.common
-    libc.src.__support.compiler_features
+    libc.src.__support.macros.attributes
+    libc.src.__support.macros.properties.architectures
+    libc.src.__support.macros.sanitizer
 )
 
 add_header_library(
@@ -59,6 +60,7 @@ add_header_library(
   DEPENDS
     .fp_bits
     libc.src.__support.CPP.type_traits
+    libc.src.__support.common
 )
 
 add_header_library(
@@ -73,6 +75,7 @@ add_header_library(
     libc.src.__support.CPP.bit
     libc.src.__support.CPP.type_traits
     libc.src.__support.common
+    libc.src.__support.macros.optimization
     libc.include.math
     libc.include.errno
     libc.src.errno.errno
@@ -108,6 +111,7 @@ add_header_library(
     .fp_bits
     .fenv_impl
     libc.src.__support.CPP.optional
+    libc.src.__support.macros.optimization
 )
 
 
@@ -163,6 +167,7 @@ add_header_library(
     multiply_add.h
   DEPENDS
     .fma
+    libc.src.__support.common
 )
 
 add_header_library(
@@ -180,6 +185,7 @@ add_header_library(
     nearest_integer.h
   DEPENDS
     libc.src.__support.common
+    libc.src.__support.macros.optimization
   FLAGS
     ROUND_OPT
 )
@@ -204,6 +210,7 @@ add_header_library(
     .multiply_add
     libc.src.__support.common
     libc.src.__support.uint
+    libc.src.__support.macros.optimization
 )
 
 add_subdirectory(generic)

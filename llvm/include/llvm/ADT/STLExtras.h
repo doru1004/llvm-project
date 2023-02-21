@@ -17,7 +17,7 @@
 #ifndef LLVM_ADT_STLEXTRAS_H
 #define LLVM_ADT_STLEXTRAS_H
 
-#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/identity.h"
@@ -786,9 +786,8 @@ protected:
   template <size_t... Ns>
   bool test_all_equals(const zip_common &other,
             std::index_sequence<Ns...>) const {
-    return all_of(std::initializer_list<bool>{std::get<Ns>(this->iterators) ==
-                                              std::get<Ns>(other.iterators)...},
-                  identity<bool>{});
+    return ((std::get<Ns>(this->iterators) == std::get<Ns>(other.iterators)) &&
+            ...);
   }
 
 public:
@@ -832,9 +831,8 @@ class zip_shortest : public zip_common<zip_shortest<Iters...>, Iters...> {
   template <size_t... Ns>
   bool test(const zip_shortest<Iters...> &other,
             std::index_sequence<Ns...>) const {
-    return all_of(llvm::ArrayRef<bool>({std::get<Ns>(this->iterators) !=
-                                        std::get<Ns>(other.iterators)...}),
-                  identity<bool>{});
+    return ((std::get<Ns>(this->iterators) != std::get<Ns>(other.iterators)) &&
+            ...);
   }
 
 public:
@@ -964,10 +962,8 @@ private:
   template <size_t... Ns>
   bool test(const zip_longest_iterator<Iters...> &other,
             std::index_sequence<Ns...>) const {
-    return llvm::any_of(
-        std::initializer_list<bool>{std::get<Ns>(this->iterators) !=
-                                    std::get<Ns>(other.iterators)...},
-        identity<bool>{});
+    return ((std::get<Ns>(this->iterators) != std::get<Ns>(other.iterators)) ||
+            ...);
   }
 
   template <size_t... Ns> value_type deref(std::index_sequence<Ns...>) const {
@@ -1874,11 +1870,13 @@ bool is_contained(R &&Range, const E &Element) {
   return std::find(adl_begin(Range), adl_end(Range), Element) != adl_end(Range);
 }
 
-template <typename T>
-constexpr bool is_contained(std::initializer_list<T> Set, T Value) {
+/// Returns true iff \p Element exists in \p Set. This overload takes \p Set as
+/// an initializer list and is `constexpr`-friendly.
+template <typename T, typename E>
+constexpr bool is_contained(std::initializer_list<T> Set, const E &Element) {
   // TODO: Use std::find when we switch to C++20.
-  for (T V : Set)
-    if (V == Value)
+  for (const T &V : Set)
+    if (V == Element)
       return true;
   return false;
 }
@@ -2016,7 +2014,7 @@ void erase_value(Container &C, ValueType V) {
 /// C.insert(C.end(), R.begin(), R.end());
 template <typename Container, typename Range>
 inline void append_range(Container &C, Range &&R) {
-  C.insert(C.end(), R.begin(), R.end());
+  C.insert(C.end(), adl_begin(R), adl_end(R));
 }
 
 /// Given a sequence container Cont, replace the range [ContIt, ContEnd) with

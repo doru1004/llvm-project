@@ -87,7 +87,7 @@ static bool canUseShiftPair(Instruction *Inst, const APInt &Imm) {
   // (and (shl x, c2), c1) will be matched to (srli (slli x, c2+c3), c3) if c1
   // is a mask shifted by c2 bits with c3 leading zeros.
   if (isShiftedMask_64(Mask)) {
-    unsigned Trailing = countTrailingZeros(Mask);
+    unsigned Trailing = llvm::countr_zero(Mask);
     if (ShAmt == Trailing)
       return true;
   }
@@ -164,7 +164,7 @@ InstructionCost RISCVTTIImpl::getIntImmCostInst(unsigned Opcode, unsigned Idx,
     // Check immediate is the correct argument...
     if (Instruction::isCommutative(Opcode) || Idx == ImmArgIdx) {
       // ... and fits into the 12-bit immediate.
-      if (Imm.getMinSignedBits() <= 64 &&
+      if (Imm.getSignificantBits() <= 64 &&
           getTLI()->isLegalAddImmediate(Imm.getSExtValue())) {
         return TTI::TCC_Free;
       }
@@ -222,8 +222,8 @@ std::optional<unsigned> RISCVTTIImpl::getVScaleForTuning() const {
 
 TypeSize
 RISCVTTIImpl::getRegisterBitWidth(TargetTransformInfo::RegisterKind K) const {
-  unsigned LMUL = PowerOf2Floor(
-      std::max<unsigned>(std::min<unsigned>(RVVRegisterWidthLMUL, 8), 1));
+  unsigned LMUL =
+      llvm::bit_floor(std::clamp<unsigned>(RVVRegisterWidthLMUL, 1, 8));
   switch (K) {
   case TargetTransformInfo::RGK_Scalar:
     return TypeSize::getFixed(ST->getXLen());
@@ -1472,4 +1472,15 @@ unsigned RISCVTTIImpl::getMaximumVF(unsigned ElemWidth, unsigned Opcode) const {
   // unprofitable transformations.
   // TODO: Figure out constant materialization cost modeling and remove.
   return SLPMaxVF;
+}
+
+bool RISCVTTIImpl::isLSRCostLess(const TargetTransformInfo::LSRCost &C1,
+                                 const TargetTransformInfo::LSRCost &C2) {
+  // RISCV specific here are "instruction number 1st priority".
+  return std::tie(C1.Insns, C1.NumRegs, C1.AddRecCost,
+                  C1.NumIVMuls, C1.NumBaseAdds,
+                  C1.ScaleCost, C1.ImmCost, C1.SetupCost) <
+         std::tie(C2.Insns, C2.NumRegs, C2.AddRecCost,
+                  C2.NumIVMuls, C2.NumBaseAdds,
+                  C2.ScaleCost, C2.ImmCost, C2.SetupCost);
 }

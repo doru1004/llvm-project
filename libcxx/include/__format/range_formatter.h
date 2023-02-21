@@ -29,12 +29,14 @@
 #include <__format/parser_std_format_spec.h>
 #include <__iterator/back_insert_iterator.h>
 #include <__ranges/concepts.h>
+#include <__ranges/data.h>
+#include <__ranges/size.h>
 #include <__type_traits/remove_cvref.h>
 #include <string_view>
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
-#if _LIBCPP_STD_VER > 20
+#if _LIBCPP_STD_VER >= 23
 
 template <class _Tp, class _CharT = char>
   requires same_as<remove_cvref_t<_Tp>, _Tp> && formattable<_Tp, _CharT>
@@ -53,8 +55,8 @@ struct _LIBCPP_TEMPLATE_VIS _LIBCPP_AVAILABILITY_FORMAT range_formatter {
 
   template <class _ParseContext>
   _LIBCPP_HIDE_FROM_ABI constexpr typename _ParseContext::iterator parse(_ParseContext& __parse_ctx) {
-    const _CharT* __begin = __parser_.__parse(__parse_ctx, __format_spec::__fields_range);
-    const _CharT* __end   = __parse_ctx.end();
+    auto __begin = __parser_.__parse(__parse_ctx, __format_spec::__fields_range);
+    auto __end   = __parse_ctx.end();
     if (__begin == __end)
       return __begin;
 
@@ -165,11 +167,16 @@ struct _LIBCPP_TEMPLATE_VIS _LIBCPP_AVAILABILITY_FORMAT range_formatter {
     // When the range is contiguous use a basic_string_view instead to avoid a
     // copy of the underlying data. The basic_string_view formatter
     // specialization is the "basic" string formatter in libc++.
-    if constexpr (ranges::contiguous_range<_Rp>) {
+    if constexpr (ranges::contiguous_range<_Rp> && std::ranges::sized_range<_Rp>) {
       std::formatter<basic_string_view<_CharT>, _CharT> __formatter;
       if (__debug_format)
         __formatter.set_debug_format();
-      return __formatter.format(basic_string_view<_CharT>{__range.data(), __range.size()}, __ctx);
+      return __formatter.format(
+          basic_string_view<_CharT>{
+              ranges::data(__range),
+              ranges::size(__range),
+          },
+          __ctx);
     } else {
       std::formatter<basic_string<_CharT>, _CharT> __formatter;
       if (__debug_format)
@@ -204,7 +211,8 @@ struct _LIBCPP_TEMPLATE_VIS _LIBCPP_AVAILABILITY_FORMAT range_formatter {
   __format_spec::__parser<_CharT> __parser_{.__alignment_ = __format_spec::__alignment::__left};
 
 private:
-  _LIBCPP_HIDE_FROM_ABI constexpr void __parse_type(const _CharT*& __begin, const _CharT* __end) {
+  template <contiguous_iterator _Iterator>
+  _LIBCPP_HIDE_FROM_ABI constexpr void __parse_type(_Iterator& __begin, _Iterator __end) {
     switch (*__begin) {
     case _CharT('m'):
       if constexpr (__fmt_pair_like<_Tp>) {
@@ -241,7 +249,7 @@ private:
   basic_string_view<_CharT> __closing_bracket_ = _LIBCPP_STATICALLY_WIDEN(_CharT, "]");
 };
 
-#endif //_LIBCPP_STD_VER > 20
+#endif //_LIBCPP_STD_VER >= 23
 
 _LIBCPP_END_NAMESPACE_STD
 
