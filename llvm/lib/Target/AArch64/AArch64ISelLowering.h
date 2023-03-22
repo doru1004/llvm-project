@@ -618,6 +618,8 @@ public:
   bool shouldReduceLoadWidth(SDNode *Load, ISD::LoadExtType ExtTy,
                              EVT NewVT) const override;
 
+  bool shouldRemoveRedundantExtend(SDValue Op) const override;
+
   bool isTruncateFree(Type *Ty1, Type *Ty2) const override;
   bool isTruncateFree(EVT VT1, EVT VT2) const override;
 
@@ -930,8 +932,7 @@ private:
   bool isExtFreeImpl(const Instruction *Ext) const override;
 
   void addTypeForNEON(MVT VT);
-  void addTypeForStreamingSVE(MVT VT);
-  void addTypeForFixedLengthSVE(MVT VT);
+  void addTypeForFixedLengthSVE(MVT VT, bool StreamingSVE);
   void addDRTypeForNEON(MVT VT);
   void addQRTypeForNEON(MVT VT);
 
@@ -1089,6 +1090,7 @@ private:
   SDValue LowerWindowsDYNAMIC_STACKALLOC(SDValue Op, SDValue Chain,
                                          SDValue &Size,
                                          SelectionDAG &DAG) const;
+  SDValue LowerAVG(SDValue Op, SelectionDAG &DAG, unsigned NewOp) const;
 
   SDValue LowerFixedLengthVectorIntDivideToSVE(SDValue Op,
                                                SelectionDAG &DAG) const;

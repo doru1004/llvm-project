@@ -1964,6 +1964,14 @@ void Verifier::verifyParameterAttrs(AttributeSet Attrs, Type *Ty,
       }
     }
   }
+
+  if (Attrs.hasAttribute(Attribute::NoFPClass)) {
+    uint64_t Val = Attrs.getAttribute(Attribute::NoFPClass).getValueAsInt();
+    Check(Val != 0, "Attribute 'nofpclass' must have at least one test bit set",
+          V);
+    Check((Val & ~static_cast<unsigned>(fcAllFlags)) == 0,
+          "Invalid value for 'nofpclass' test mask", V);
+  }
 }
 
 void Verifier::checkUnsignedBaseTenFuncAttr(AttributeList Attrs, StringRef Attr,
@@ -3888,7 +3896,8 @@ void Verifier::visitRangeMetadata(Instruction &I, MDNode *Range, Type *Ty) {
     ConstantInt *High =
         mdconst::dyn_extract<ConstantInt>(Range->getOperand(2 * i + 1));
     Check(High, "The upper limit must be an integer!", High);
-    Check(High->getType() == Low->getType() && High->getType() == Ty,
+    Check(High->getType() == Low->getType() &&
+          High->getType() == Ty->getScalarType(),
           "Range types must match instruction type!", &I);
 
     APInt HighV = High->getValue();
@@ -5070,7 +5079,7 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
   }
   case Intrinsic::is_fpclass: {
     const ConstantInt *TestMask = cast<ConstantInt>(Call.getOperand(1));
-    Check((TestMask->getZExtValue() & ~fcAllFlags) == 0,
+    Check((TestMask->getZExtValue() & ~static_cast<unsigned>(fcAllFlags)) == 0,
           "unsupported bits for llvm.is.fpclass test mask");
     break;
   }
@@ -5107,9 +5116,6 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
     Check(isa<MetadataAsValue>(Call.getArgOperand(0)),
           "invalid llvm.dbg.declare intrinsic call 1", Call);
     visitDbgIntrinsic("declare", cast<DbgVariableIntrinsic>(Call));
-    break;
-  case Intrinsic::dbg_addr: // llvm.dbg.addr
-    visitDbgIntrinsic("addr", cast<DbgVariableIntrinsic>(Call));
     break;
   case Intrinsic::dbg_value: // llvm.dbg.value
     visitDbgIntrinsic("value", cast<DbgVariableIntrinsic>(Call));
@@ -6108,8 +6114,8 @@ void Verifier::visitConstrainedFPIntrinsic(ConstrainedFPIntrinsic &FPI) {
     Check(OperandTy->isVectorTy() == ResultTy->isVectorTy(),
           "Intrinsic first argument and result disagree on vector use", &FPI);
     if (OperandTy->isVectorTy()) {
-      Check(cast<FixedVectorType>(OperandTy)->getNumElements() ==
-                cast<FixedVectorType>(ResultTy)->getNumElements(),
+      Check(cast<VectorType>(OperandTy)->getElementCount() ==
+                cast<VectorType>(ResultTy)->getElementCount(),
             "Intrinsic first argument and result vector lengths must be equal",
             &FPI);
     }

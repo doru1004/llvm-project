@@ -1299,6 +1299,11 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
       setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i16, Legal);
       setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i32, Legal);
       setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i64, Legal);
+
+      setOperationAction(ISD::ABDU, MVT::v16i8, Legal);
+      setOperationAction(ISD::ABDU, MVT::v8i16, Legal);
+      setOperationAction(ISD::ABDU, MVT::v4i32, Legal);
+      setOperationAction(ISD::ABDS, MVT::v4i32, Legal);
     }
 
     if (Subtarget.hasP10Vector()) {
@@ -1383,10 +1388,6 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
 
   if (Subtarget.useCRBits()) {
     setTargetDAGCombine({ISD::TRUNCATE, ISD::SETCC, ISD::SELECT_CC});
-  }
-
-  if (Subtarget.hasP9Altivec()) {
-    setTargetDAGCombine({ISD::ABS, ISD::VSELECT});
   }
 
   setLibcallName(RTLIB::LOG_F128, "logf128");
@@ -1750,7 +1751,6 @@ const char *PPCTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case PPCISD::RFEBB:           return "PPCISD::RFEBB";
   case PPCISD::XXSWAPD:         return "PPCISD::XXSWAPD";
   case PPCISD::SWAP_NO_CHAIN:   return "PPCISD::SWAP_NO_CHAIN";
-  case PPCISD::VABSD:           return "PPCISD::VABSD";
   case PPCISD::BUILD_FP128:     return "PPCISD::BUILD_FP128";
   case PPCISD::BUILD_SPE64:     return "PPCISD::BUILD_SPE64";
   case PPCISD::EXTRACT_SPE:     return "PPCISD::EXTRACT_SPE";
@@ -4846,8 +4846,8 @@ bool PPCTargetLowering::IsEligibleForTailCallOptimization_64SVR4(
     const GlobalValue *CalleeGV, CallingConv::ID CalleeCC,
     CallingConv::ID CallerCC, const CallBase *CB, bool isVarArg,
     const SmallVectorImpl<ISD::OutputArg> &Outs,
-    const SmallVectorImpl<ISD::InputArg> &Ins, bool isByValArg,
-    const Function *CallerFunc, bool isCalleeExternalSymbol) const {
+    const SmallVectorImpl<ISD::InputArg> &Ins, const Function *CallerFunc,
+    bool isCalleeExternalSymbol) const {
   bool TailCallOpt = getTargetMachine().Options.GuaranteedTailCallOpt;
 
   if (DisableSCO && !TailCallOpt) return false;
@@ -4860,8 +4860,7 @@ bool PPCTargetLowering::IsEligibleForTailCallOptimization_64SVR4(
     return false;
 
   // Caller contains any byval parameter is not supported.
-  if (isByValArg ||
-      any_of(Ins, [](const ISD::InputArg &IA) { return IA.Flags.isByVal(); }))
+  if (any_of(Ins, [](const ISD::InputArg &IA) { return IA.Flags.isByVal(); }))
     return false;
 
   // Callee contains any byval parameter is not supported, too.
@@ -4933,7 +4932,7 @@ bool PPCTargetLowering::IsEligibleForTailCallOptimization_64SVR4(
 bool PPCTargetLowering::IsEligibleForTailCallOptimization(
     const GlobalValue *CalleeGV, CallingConv::ID CalleeCC,
     CallingConv::ID CallerCC, bool isVarArg,
-    const SmallVectorImpl<ISD::InputArg> &Ins, bool isByValArg) const {
+    const SmallVectorImpl<ISD::InputArg> &Ins) const {
   if (!getTargetMachine().Options.GuaranteedTailCallOpt)
     return false;
 
@@ -4943,8 +4942,7 @@ bool PPCTargetLowering::IsEligibleForTailCallOptimization(
 
   if (CalleeCC == CallingConv::Fast && CallerCC == CalleeCC) {
     // Functions containing by val parameters are not supported.
-    if (isByValArg ||
-        any_of(Ins, [](const ISD::InputArg &IA) { return IA.Flags.isByVal(); }))
+    if (any_of(Ins, [](const ISD::InputArg &IA) { return IA.Flags.isByVal(); }))
       return false;
 
     // Non-PIC/GOT tail calls are supported.
@@ -5647,22 +5645,43 @@ SDValue PPCTargetLowering::FinishCall(
                          DAG, InVals);
 }
 
+bool PPCTargetLowering::supportsTailCallFor(const CallBase *CB) const {
+  CallingConv::ID CalleeCC = CB->getCallingConv();
+  const Function *CallerFunc = CB->getCaller();
+  CallingConv::ID CallerCC = CallerFunc->getCallingConv();
+  const Function *CalleeFunc = CB->getCalledFunction();
+  if (!CalleeFunc)
+    return false;
+  const GlobalValue *CalleeGV = dyn_cast<GlobalValue>(CalleeFunc);
+
+  SmallVector<ISD::OutputArg, 2> Outs;
+  SmallVector<ISD::InputArg, 2> Ins;
+
+  GetReturnInfo(CalleeCC, CalleeFunc->getReturnType(),
+                CalleeFunc->getAttributes(), Outs, *this,
+                CalleeFunc->getParent()->getDataLayout());
+
+  return isEligibleForTCO(CalleeGV, CalleeCC, CallerCC, CB,
+                          CalleeFunc->isVarArg(), Outs, Ins, CallerFunc,
+                          false /*isCalleeExternalSymbol*/);
+}
+
 bool PPCTargetLowering::isEligibleForTCO(
     const GlobalValue *CalleeGV, CallingConv::ID CalleeCC,
     CallingConv::ID CallerCC, const CallBase *CB, bool isVarArg,
     const SmallVectorImpl<ISD::OutputArg> &Outs,
-    const SmallVectorImpl<ISD::InputArg> &Ins, bool isByValArg,
-    const Function *CallerFunc, bool isCalleeExternalSymbol) const {
+    const SmallVectorImpl<ISD::InputArg> &Ins, const Function *CallerFunc,
+    bool isCalleeExternalSymbol) const {
   if (Subtarget.useLongCalls() && !(CB && CB->isMustTailCall()))
     return false;
 
   if (Subtarget.isSVR4ABI() && Subtarget.isPPC64())
     return IsEligibleForTailCallOptimization_64SVR4(
-        CalleeGV, CalleeCC, CallerCC, CB, isVarArg, Outs, Ins, isByValArg,
-        CallerFunc, isCalleeExternalSymbol);
+        CalleeGV, CalleeCC, CallerCC, CB, isVarArg, Outs, Ins, CallerFunc,
+        isCalleeExternalSymbol);
   else
     return IsEligibleForTailCallOptimization(CalleeGV, CalleeCC, CallerCC,
-                                             isVarArg, Ins, isByValArg);
+                                             isVarArg, Ins);
 }
 
 SDValue
@@ -5688,9 +5707,9 @@ PPCTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     const GlobalValue *GV = G ? G->getGlobal() : nullptr;
     bool IsCalleeExternalSymbol = isa<ExternalSymbolSDNode>(Callee);
 
-    isTailCall = isEligibleForTCO(GV, CallConv, CallerCC, CB, isVarArg, Outs,
-                                  Ins, false /*isByValArg*/,
-                                  &(MF.getFunction()), IsCalleeExternalSymbol);
+    isTailCall =
+        isEligibleForTCO(GV, CallConv, CallerCC, CB, isVarArg, Outs, Ins,
+                         &(MF.getFunction()), IsCalleeExternalSymbol);
     if (isTailCall) {
       ++NumTailCalls;
       if (!getTargetMachine().Options.GuaranteedTailCallOpt)
@@ -9292,7 +9311,7 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
       // Exclude somes case where LD_SPLAT is worse than scalar_to_vector:
       // Below cases should also happen for "lfiwzx/lfiwax + LE target + index
       // 1" and "lxvrhx + BE target + index 7" and "lxvrbx + BE target + index
-      // 15", but funciton IsValidSplatLoad() now will only return true when
+      // 15", but function IsValidSplatLoad() now will only return true when
       // the data at index 0 is not nullptr. So we will not get into trouble for
       // these cases.
       //
@@ -15764,16 +15783,37 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
 
     break;
   case ISD::INTRINSIC_W_CHAIN:
-    // For little endian, VSX loads require generating lxvd2x/xxswapd.
-    // Not needed on ISA 3.0 based CPUs since we have a non-permuting load.
-    if (Subtarget.needsSwapsForVSXMemOps()) {
-      switch (cast<ConstantSDNode>(N->getOperand(1))->getZExtValue()) {
-      default:
-        break;
-      case Intrinsic::ppc_vsx_lxvw4x:
-      case Intrinsic::ppc_vsx_lxvd2x:
-        return expandVSXLoadForLE(N, DCI);
+    switch (cast<ConstantSDNode>(N->getOperand(1))->getZExtValue()) {
+    default:
+      break;
+    case Intrinsic::ppc_altivec_vsum4sbs:
+    case Intrinsic::ppc_altivec_vsum4shs:
+    case Intrinsic::ppc_altivec_vsum4ubs: {
+      // These sum-across intrinsics only have a chain due to the side effect
+      // that they may set the SAT bit. If we know the SAT bit will not be set
+      // for some inputs, we can replace any uses of their chain with the input
+      // chain.
+      if (BuildVectorSDNode *BVN =
+              dyn_cast<BuildVectorSDNode>(N->getOperand(3))) {
+        APInt APSplatBits, APSplatUndef;
+        unsigned SplatBitSize;
+        bool HasAnyUndefs;
+        bool BVNIsConstantSplat = BVN->isConstantSplat(
+            APSplatBits, APSplatUndef, SplatBitSize, HasAnyUndefs, 0,
+            !Subtarget.isLittleEndian());
+        // If the constant splat vector is 0, the SAT bit will not be set.
+        if (BVNIsConstantSplat && APSplatBits == 0)
+          DAG.ReplaceAllUsesOfValueWith(SDValue(N, 1), N->getOperand(0));
       }
+      return SDValue();
+    }
+    case Intrinsic::ppc_vsx_lxvw4x:
+    case Intrinsic::ppc_vsx_lxvd2x:
+      // For little endian, VSX loads require generating lxvd2x/xxswapd.
+      // Not needed on ISA 3.0 based CPUs since we have a non-permuting load.
+      if (Subtarget.needsSwapsForVSXMemOps())
+        return expandVSXLoadForLE(N, DCI);
+      break;
     }
     break;
   case ISD::INTRINSIC_VOID:
@@ -16034,10 +16074,6 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
   }
   case ISD::BUILD_VECTOR:
     return DAGCombineBuildVector(N, DCI);
-  case ISD::ABS:
-    return combineABS(N, DCI);
-  case ISD::VSELECT:
-    return combineVSelect(N, DCI);
   }
 
   return SDValue();
@@ -17463,24 +17499,6 @@ SDValue PPCTargetLowering::combineTRUNCATE(SDNode *N,
   SDLoc dl(N);
   SDValue Op0 = N->getOperand(0);
 
-  // fold (truncate (abs (sub (zext a), (zext b)))) -> (vabsd a, b)
-  if (Subtarget.hasP9Altivec() && Op0.getOpcode() == ISD::ABS) {
-    EVT VT = N->getValueType(0);
-    if (VT != MVT::v4i32 && VT != MVT::v8i16 && VT != MVT::v16i8)
-      return SDValue();
-    SDValue Sub = Op0.getOperand(0);
-    if (Sub.getOpcode() == ISD::SUB) {
-      SDValue SubOp0 = Sub.getOperand(0);
-      SDValue SubOp1 = Sub.getOperand(1);
-      if ((SubOp0.getOpcode() == ISD::ZERO_EXTEND) &&
-          (SubOp1.getOpcode() == ISD::ZERO_EXTEND)) {
-        return DCI.DAG.getNode(PPCISD::VABSD, dl, VT, SubOp0.getOperand(0),
-                               SubOp1.getOperand(0),
-                               DCI.DAG.getTargetConstant(0, dl, MVT::i32));
-      }
-    }
-  }
-
   // Looking for a truncate of i128 to i64.
   if (Op0.getValueType() != MVT::i128 || N->getValueType(0) != MVT::i64)
     return SDValue();
@@ -17679,112 +17697,6 @@ isMaskAndCmp0FoldingBeneficial(const Instruction &AndI) const {
 
   // For non-constant masks, we can always use the record-form and.
   return true;
-}
-
-// Transform (abs (sub (zext a), (zext b))) to (vabsd a b 0)
-// Transform (abs (sub (zext a), (zext_invec b))) to (vabsd a b 0)
-// Transform (abs (sub (zext_invec a), (zext_invec b))) to (vabsd a b 0)
-// Transform (abs (sub (zext_invec a), (zext b))) to (vabsd a b 0)
-// Transform (abs (sub a, b) to (vabsd a b 1)) if a & b of type v4i32
-SDValue PPCTargetLowering::combineABS(SDNode *N, DAGCombinerInfo &DCI) const {
-  assert((N->getOpcode() == ISD::ABS) && "Need ABS node here");
-  assert(Subtarget.hasP9Altivec() &&
-         "Only combine this when P9 altivec supported!");
-  EVT VT = N->getValueType(0);
-  if (VT != MVT::v4i32 && VT != MVT::v8i16 && VT != MVT::v16i8)
-    return SDValue();
-
-  SelectionDAG &DAG = DCI.DAG;
-  SDLoc dl(N);
-  if (N->getOperand(0).getOpcode() == ISD::SUB) {
-    // Even for signed integers, if it's known to be positive (as signed
-    // integer) due to zero-extended inputs.
-    unsigned SubOpcd0 = N->getOperand(0)->getOperand(0).getOpcode();
-    unsigned SubOpcd1 = N->getOperand(0)->getOperand(1).getOpcode();
-    if ((SubOpcd0 == ISD::ZERO_EXTEND ||
-         SubOpcd0 == ISD::ZERO_EXTEND_VECTOR_INREG) &&
-        (SubOpcd1 == ISD::ZERO_EXTEND ||
-         SubOpcd1 == ISD::ZERO_EXTEND_VECTOR_INREG)) {
-      return DAG.getNode(PPCISD::VABSD, dl, N->getOperand(0).getValueType(),
-                         N->getOperand(0)->getOperand(0),
-                         N->getOperand(0)->getOperand(1),
-                         DAG.getTargetConstant(0, dl, MVT::i32));
-    }
-
-    // For type v4i32, it can be optimized with xvnegsp + vabsduw
-    if (N->getOperand(0).getValueType() == MVT::v4i32 &&
-        N->getOperand(0).hasOneUse()) {
-      return DAG.getNode(PPCISD::VABSD, dl, N->getOperand(0).getValueType(),
-                         N->getOperand(0)->getOperand(0),
-                         N->getOperand(0)->getOperand(1),
-                         DAG.getTargetConstant(1, dl, MVT::i32));
-    }
-  }
-
-  return SDValue();
-}
-
-// For type v4i32/v8ii16/v16i8, transform
-// from (vselect (setcc a, b, setugt), (sub a, b), (sub b, a)) to (vabsd a, b)
-// from (vselect (setcc a, b, setuge), (sub a, b), (sub b, a)) to (vabsd a, b)
-// from (vselect (setcc a, b, setult), (sub b, a), (sub a, b)) to (vabsd a, b)
-// from (vselect (setcc a, b, setule), (sub b, a), (sub a, b)) to (vabsd a, b)
-SDValue PPCTargetLowering::combineVSelect(SDNode *N,
-                                          DAGCombinerInfo &DCI) const {
-  assert((N->getOpcode() == ISD::VSELECT) && "Need VSELECT node here");
-  assert(Subtarget.hasP9Altivec() &&
-         "Only combine this when P9 altivec supported!");
-
-  SelectionDAG &DAG = DCI.DAG;
-  SDLoc dl(N);
-  SDValue Cond = N->getOperand(0);
-  SDValue TrueOpnd = N->getOperand(1);
-  SDValue FalseOpnd = N->getOperand(2);
-  EVT VT = N->getOperand(1).getValueType();
-
-  if (Cond.getOpcode() != ISD::SETCC || TrueOpnd.getOpcode() != ISD::SUB ||
-      FalseOpnd.getOpcode() != ISD::SUB)
-    return SDValue();
-
-  // ABSD only available for type v4i32/v8i16/v16i8
-  if (VT != MVT::v4i32 && VT != MVT::v8i16 && VT != MVT::v16i8)
-    return SDValue();
-
-  // At least to save one more dependent computation
-  if (!(Cond.hasOneUse() || TrueOpnd.hasOneUse() || FalseOpnd.hasOneUse()))
-    return SDValue();
-
-  ISD::CondCode CC = cast<CondCodeSDNode>(Cond.getOperand(2))->get();
-
-  // Can only handle unsigned comparison here
-  switch (CC) {
-  default:
-    return SDValue();
-  case ISD::SETUGT:
-  case ISD::SETUGE:
-    break;
-  case ISD::SETULT:
-  case ISD::SETULE:
-    std::swap(TrueOpnd, FalseOpnd);
-    break;
-  }
-
-  SDValue CmpOpnd1 = Cond.getOperand(0);
-  SDValue CmpOpnd2 = Cond.getOperand(1);
-
-  // SETCC CmpOpnd1 CmpOpnd2 cond
-  // TrueOpnd = CmpOpnd1 - CmpOpnd2
-  // FalseOpnd = CmpOpnd2 - CmpOpnd1
-  if (TrueOpnd.getOperand(0) == CmpOpnd1 &&
-      TrueOpnd.getOperand(1) == CmpOpnd2 &&
-      FalseOpnd.getOperand(0) == CmpOpnd2 &&
-      FalseOpnd.getOperand(1) == CmpOpnd1) {
-    return DAG.getNode(PPCISD::VABSD, dl, N->getOperand(1).getValueType(),
-                       CmpOpnd1, CmpOpnd2,
-                       DAG.getTargetConstant(0, dl, MVT::i32));
-  }
-
-  return SDValue();
 }
 
 /// getAddrModeForFlags - Based on the set of address flags, select the most

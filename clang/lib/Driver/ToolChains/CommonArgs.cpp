@@ -410,7 +410,7 @@ std::string tools::getCPUName(const Driver &D, const ArgList &Args,
   case llvm::Triple::ppcle:
   case llvm::Triple::ppc64:
   case llvm::Triple::ppc64le:
-    return ppc::getPPCTargetCPU(Args, T);
+    return ppc::getPPCTargetCPU(D, Args, T);
 
   case llvm::Triple::csky:
     if (const Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
@@ -795,22 +795,6 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
                          /*IsLTO=*/true, PluginOptPrefix);
 }
 
-void tools::addOpenMPRuntimeSpecificRPath(const ToolChain &TC,
-                                          const ArgList &Args,
-                                          ArgStringList &CmdArgs) {
-
-  if (Args.hasFlag(options::OPT_fopenmp_implicit_rpath,
-                   options::OPT_fno_openmp_implicit_rpath, true)) {
-    // Default to clang lib / lib64 folder, i.e. the same location as device
-    // runtime
-    SmallString<256> DefaultLibPath =
-        llvm::sys::path::parent_path(TC.getDriver().Dir);
-    llvm::sys::path::append(DefaultLibPath, CLANG_INSTALL_LIBDIR_BASENAME);
-    CmdArgs.push_back("-rpath");
-    CmdArgs.push_back(Args.MakeArgString(DefaultLibPath));
-  }
-}
-
 void tools::addOpenMPRuntimeLibraryPath(const ToolChain &TC,
                                         const ArgList &Args,
                                         ArgStringList &CmdArgs) {
@@ -881,9 +865,6 @@ bool tools::addOpenMPRuntime(ArgStringList &CmdArgs, const ToolChain &TC,
     CmdArgs.push_back("-lomptarget.devicertl");
 
   addArchSpecificRPath(TC, Args, CmdArgs);
-
-  if (RTKind == Driver::OMPRT_OMP)
-    addOpenMPRuntimeSpecificRPath(TC, Args, CmdArgs);
   addOpenMPRuntimeLibraryPath(TC, Args, CmdArgs);
 
   return true;
@@ -976,7 +957,7 @@ void tools::linkSanitizerRuntimeDeps(const ToolChain &TC,
   CmdArgs.push_back(getAsNeededOption(TC, false));
   // There's no libpthread or librt on RTEMS & Android.
   if (TC.getTriple().getOS() != llvm::Triple::RTEMS &&
-      !TC.getTriple().isAndroid()) {
+      !TC.getTriple().isAndroid() && !TC.getTriple().isOHOSFamily()) {
     CmdArgs.push_back("-lpthread");
     if (!TC.getTriple().isOSOpenBSD())
       CmdArgs.push_back("-lrt");
@@ -1400,6 +1381,10 @@ tools::ParsePICArgs(const ToolChain &ToolChain, const ArgList &Args) {
     }
   }
 
+  // OHOS-specific defaults for PIC/PIE
+  if (Triple.isOHOSFamily() && Triple.getArch() == llvm::Triple::aarch64)
+    PIC = true;
+
   // OpenBSD-specific defaults for PIE
   if (Triple.isOSOpenBSD()) {
     switch (ToolChain.getArch()) {
@@ -1686,6 +1671,12 @@ static LibGccType getLibGccType(const ToolChain &TC, const Driver &D,
 static void AddUnwindLibrary(const ToolChain &TC, const Driver &D,
                              ArgStringList &CmdArgs, const ArgList &Args) {
   ToolChain::UnwindLibType UNW = TC.GetUnwindLibType(Args);
+  // By default OHOS binaries are linked statically to libunwind.
+  if (TC.getTriple().isOHOSFamily() && UNW == ToolChain::UNW_CompilerRT) {
+    CmdArgs.push_back("-l:libunwind.a");
+    return;
+  }
+
   // Targets that don't use unwind libraries.
   if ((TC.getTriple().isAndroid() && UNW == ToolChain::UNW_Libgcc) ||
       TC.getTriple().isOSIAMCU() || TC.getTriple().isOSBinFormatWasm() ||
@@ -1785,22 +1776,29 @@ SmallString<128> tools::getStatsFileName(const llvm::opt::ArgList &Args,
                                          const InputInfo &Input,
                                          const Driver &D) {
   const Arg *A = Args.getLastArg(options::OPT_save_stats_EQ);
-  if (!A)
+  if (!A && !D.CCPrintInternalStats)
     return {};
 
-  StringRef SaveStats = A->getValue();
   SmallString<128> StatsFile;
-  if (SaveStats == "obj" && Output.isFilename()) {
-    StatsFile.assign(Output.getFilename());
-    llvm::sys::path::remove_filename(StatsFile);
-  } else if (SaveStats != "cwd") {
-    D.Diag(diag::err_drv_invalid_value) << A->getAsString(Args) << SaveStats;
-    return {};
-  }
+  if (A) {
+    StringRef SaveStats = A->getValue();
+    if (SaveStats == "obj" && Output.isFilename()) {
+      StatsFile.assign(Output.getFilename());
+      llvm::sys::path::remove_filename(StatsFile);
+    } else if (SaveStats != "cwd") {
+      D.Diag(diag::err_drv_invalid_value) << A->getAsString(Args) << SaveStats;
+      return {};
+    }
 
-  StringRef BaseName = llvm::sys::path::filename(Input.getBaseInput());
-  llvm::sys::path::append(StatsFile, BaseName);
-  llvm::sys::path::replace_extension(StatsFile, "stats");
+    StringRef BaseName = llvm::sys::path::filename(Input.getBaseInput());
+    llvm::sys::path::append(StatsFile, BaseName);
+    llvm::sys::path::replace_extension(StatsFile, "stats");
+  } else {
+    assert(D.CCPrintInternalStats);
+    StatsFile.assign(D.CCPrintInternalStatReportFilename.empty()
+                         ? "-"
+                         : D.CCPrintInternalStatReportFilename);
+  }
   return StatsFile;
 }
 

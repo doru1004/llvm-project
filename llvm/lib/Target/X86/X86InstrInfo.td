@@ -380,6 +380,9 @@ let RenderMethod = "addMemOperands", SuperClasses = [X86MemAsmOperand] in {
   def X86Mem512_RC256XOperand : AsmOperandClass { let Name = "Mem512_RC256X"; }
   def X86Mem256_RC512Operand  : AsmOperandClass { let Name = "Mem256_RC512"; }
   def X86Mem512_RC512Operand  : AsmOperandClass { let Name = "Mem512_RC512"; }
+  def X86Mem512_GR16Operand : AsmOperandClass { let Name = "Mem512_GR16"; }
+  def X86Mem512_GR32Operand : AsmOperandClass { let Name = "Mem512_GR32"; }
+  def X86Mem512_GR64Operand : AsmOperandClass { let Name = "Mem512_GR64"; }
 
   def X86SibMemOperand : AsmOperandClass { let Name = "SibMem"; }
 }
@@ -431,6 +434,11 @@ def f80mem  : X86MemOperand<"printtbytemem",  X86Mem80AsmOperand, 80>;
 def f128mem : X86MemOperand<"printxmmwordmem", X86Mem128AsmOperand, 128>;
 def f256mem : X86MemOperand<"printymmwordmem", X86Mem256AsmOperand, 256>;
 def f512mem : X86MemOperand<"printzmmwordmem", X86Mem512AsmOperand, 512>;
+
+// 32/64 mode specific mem operands
+def i512mem_GR16 : X86MemOperand<"printzmmwordmem", X86Mem512_GR16Operand, 512>;
+def i512mem_GR32 : X86MemOperand<"printzmmwordmem", X86Mem512_GR32Operand, 512>;
+def i512mem_GR64 : X86MemOperand<"printzmmwordmem", X86Mem512_GR64Operand, 512>;
 
 // Gather mem operands
 def vx64mem  : X86VMemOperand<VR128,  "printqwordmem",  X86Mem64_RC128Operand, 64>;
@@ -1294,7 +1302,8 @@ def trunc_su : unop_oneuse<trunc>;
 class X86TypeInfo<ValueType vt, string instrsuffix, RegisterClass regclass,
                   PatFrag loadnode, X86MemOperand memoperand, ImmType immkind,
                   Operand immoperand, SDPatternOperator immoperator,
-                  Operand imm8operand, SDPatternOperator imm8operator,
+                  SDPatternOperator immnosuoperator, Operand imm8operand, 
+                  SDPatternOperator imm8operator, SDPatternOperator imm8nosuoperator,
                   bit hasOddOpcode, OperandSize opSize,
                   bit hasREX_W> {
   /// VT - This is the value type itself.
@@ -1332,6 +1341,8 @@ class X86TypeInfo<ValueType vt, string instrsuffix, RegisterClass regclass,
   /// immediate of this kind in a pattern (e.g. imm, or i64immSExt32).
   SDPatternOperator ImmOperator = immoperator;
 
+  SDPatternOperator ImmNoSuOperator = immnosuoperator;
+
   /// Imm8Operand - This is the operand kind to use for an imm8 of this type.
   /// For example, i8 -> <invalid>, i16 -> i16i8imm, i32 -> i32i8imm.  This is
   /// only used for instructions that have a sign-extended imm8 field form.
@@ -1340,6 +1351,8 @@ class X86TypeInfo<ValueType vt, string instrsuffix, RegisterClass regclass,
   /// Imm8Operator - This is the operator that should be used to match an 8-bit
   /// sign extended immediate of this kind in a pattern (e.g. imm16immSExt8).
   SDPatternOperator Imm8Operator = imm8operator;
+
+  SDPatternOperator Imm8NoSuOperator = imm8nosuoperator;
 
   /// HasOddOpcode - This bit is true if the instruction should have an odd (as
   /// opposed to even) opcode.  Operations on i8 are usually even, operations on
@@ -1358,20 +1371,18 @@ class X86TypeInfo<ValueType vt, string instrsuffix, RegisterClass regclass,
 
 def invalid_node : SDNode<"<<invalid_node>>", SDTIntLeaf,[],"<<invalid_node>>">;
 
-
-def Xi8  : X86TypeInfo<i8, "b", GR8, loadi8, i8mem,
-                       Imm8, i8imm, imm_su, i8imm, invalid_node,
+def Xi8  : X86TypeInfo<i8, "b", GR8, loadi8, i8mem, Imm8, i8imm, 
+                       imm_su, imm, i8imm, invalid_node, invalid_node,
                        0, OpSizeFixed, 0>;
-def Xi16 : X86TypeInfo<i16, "w", GR16, loadi16, i16mem,
-                       Imm16, i16imm, imm_su, i16i8imm, i16immSExt8_su,
+def Xi16 : X86TypeInfo<i16, "w", GR16, loadi16, i16mem, Imm16, i16imm, 
+                       imm_su, imm, i16i8imm, i16immSExt8_su, i16immSExt8,
                        1, OpSize16, 0>;
-def Xi32 : X86TypeInfo<i32, "l", GR32, loadi32, i32mem,
-                       Imm32, i32imm, imm_su, i32i8imm, i32immSExt8_su,
+def Xi32 : X86TypeInfo<i32, "l", GR32, loadi32, i32mem, Imm32, i32imm, 
+                       imm_su, imm, i32i8imm, i32immSExt8_su, i32immSExt8,
                        1, OpSize32, 0>;
-def Xi64 : X86TypeInfo<i64, "q", GR64, loadi64, i64mem,
-                       Imm32S, i64i32imm, i64immSExt32_su, i64i8imm, i64immSExt8_su,
-                       1, OpSizeFixed, 1>;
-
+def Xi64 : X86TypeInfo<i64, "q", GR64, loadi64, i64mem, Imm32S, i64i32imm, 
+                      i64immSExt32_su, i64immSExt32, i64i8imm, i64immSExt8_su,
+                      i64immSExt8, 1, OpSizeFixed, 1>;
 //===----------------------------------------------------------------------===//
 // Subsystems.
 //===----------------------------------------------------------------------===//

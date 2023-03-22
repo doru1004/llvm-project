@@ -912,10 +912,6 @@ bool AMDGPUTargetLowering::isZExtFree(EVT Src, EVT Dest) const {
   return Src == MVT::i32 && Dest == MVT::i64;
 }
 
-bool AMDGPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
-  return isZExtFree(Val.getValueType(), VT2);
-}
-
 bool AMDGPUTargetLowering::isNarrowingProfitable(EVT SrcVT, EVT DestVT) const {
   // There aren't really 64-bit registers, but pairs of 32-bit ones and only a
   // limited number of native 64-bit operations. Shrinking an operation to fit
@@ -1328,6 +1324,13 @@ SDValue AMDGPUTargetLowering::LowerGlobalAddress(AMDGPUMachineFunction* MFI,
   const DataLayout &DL = DAG.getDataLayout();
   GlobalAddressSDNode *G = cast<GlobalAddressSDNode>(Op);
   const GlobalValue *GV = G->getGlobal();
+
+  if (!MFI->isModuleEntryFunction()) {
+    if (std::optional<uint32_t> Address =
+            AMDGPUMachineFunction::getLDSAbsoluteAddress(*GV)) {
+      return DAG.getConstant(*Address, SDLoc(Op), Op.getValueType());
+    }
+  }
 
   if (G->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS ||
       G->getAddressSpace() == AMDGPUAS::REGION_ADDRESS) {

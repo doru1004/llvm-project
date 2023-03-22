@@ -539,12 +539,16 @@ static Value *threadBinOpOverPHI(Instruction::BinaryOps Opcode, Value *LHS,
 
   // Evaluate the BinOp on the incoming phi values.
   Value *CommonValue = nullptr;
-  for (Value *Incoming : PI->incoming_values()) {
+  for (Use &Incoming : PI->incoming_values()) {
     // If the incoming value is the phi node itself, it can safely be skipped.
     if (Incoming == PI)
       continue;
-    Value *V = PI == LHS ? simplifyBinOp(Opcode, Incoming, RHS, Q, MaxRecurse)
-                         : simplifyBinOp(Opcode, LHS, Incoming, Q, MaxRecurse);
+    Instruction *InTI = PI->getIncomingBlock(Incoming)->getTerminator();
+    Value *V = PI == LHS
+                   ? simplifyBinOp(Opcode, Incoming, RHS,
+                                   Q.getWithInstruction(InTI), MaxRecurse)
+                   : simplifyBinOp(Opcode, LHS, Incoming,
+                                   Q.getWithInstruction(InTI), MaxRecurse);
     // If the operation failed to simplify, or simplified to a different value
     // to previously, then give up.
     if (!V || (CommonValue && V != CommonValue))
@@ -1407,8 +1411,8 @@ static Value *simplifyShift(Instruction::BinaryOps Opcode, Value *Op0,
   return nullptr;
 }
 
-/// Given operands for an Shl, LShr or AShr, see if we can
-/// fold the result.  If not, this returns null.
+/// Given operands for an LShr or AShr, see if we can fold the result.  If not,
+/// this returns null.
 static Value *simplifyRightShift(Instruction::BinaryOps Opcode, Value *Op0,
                                  Value *Op1, bool IsExact,
                                  const SimplifyQuery &Q, unsigned MaxRecurse) {
@@ -1445,10 +1449,11 @@ static Value *simplifyShlInst(Value *Op0, Value *Op1, bool IsNSW, bool IsNUW,
           simplifyShift(Instruction::Shl, Op0, Op1, IsNSW, Q, MaxRecurse))
     return V;
 
+  Type *Ty = Op0->getType();
   // undef << X -> 0
   // undef << X -> undef if (if it's NSW/NUW)
   if (Q.isUndefValue(Op0))
-    return IsNSW || IsNUW ? Op0 : Constant::getNullValue(Op0->getType());
+    return IsNSW || IsNUW ? Op0 : Constant::getNullValue(Ty);
 
   // (X >> A) << A -> X
   Value *X;
@@ -1461,6 +1466,13 @@ static Value *simplifyShlInst(Value *Op0, Value *Op1, bool IsNSW, bool IsNUW,
     return Op0;
   // NOTE: could use computeKnownBits() / LazyValueInfo,
   // but the cost-benefit analysis suggests it isn't worth it.
+
+  // "nuw" guarantees that only zeros are shifted out, and "nsw" guarantees
+  // that the sign-bit does not change, so the only input that does not
+  // produce poison is 0, and "0 << (bitwidth-1) --> 0".
+  if (IsNSW && IsNUW &&
+      match(Op1, m_SpecificInt(Ty->getScalarSizeInBits() - 1)))
+    return Constant::getNullValue(Ty);
 
   return nullptr;
 }
@@ -3955,6 +3967,10 @@ static Value *simplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
   if (Value *V = simplifyICmpWithDominatingAssume(Pred, LHS, RHS, Q))
     return V;
 
+  if (std::optional<bool> Res =
+          isImpliedByDomCondition(Pred, LHS, RHS, Q.CxtI, Q.DL))
+    return ConstantInt::getBool(ITy, *Res);
+
   // Simplify comparisons of related pointers using a powerful, recursive
   // GEP-walk when we have target data available..
   if (LHS->getType()->isPointerTy())
@@ -4253,6 +4269,17 @@ static Value *simplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
       if ((Opcode == Instruction::And || Opcode == Instruction::Or) &&
           NewOps[0] == NewOps[1])
         return NewOps[0];
+
+      // If we are substituting an absorber constant into a binop and extra
+      // poison can't leak if we remove the select -- because both operands of
+      // the binop are based on the same value -- then it may be safe to replace
+      // the value with the absorber constant. Examples:
+      // (Op == 0) ? 0 : (Op & -Op)            --> Op & -Op
+      // (Op == 0) ? 0 : (Op * (binop Op, C))  --> Op * (binop Op, C)
+      // (Op == -1) ? -1 : (Op | (binop C, Op) --> Op | (binop C, Op)
+      if (RepOp == ConstantExpr::getBinOpAbsorber(Opcode, I->getType()) &&
+          impliesPoison(BO, Op))
+        return RepOp;
     }
 
     if (auto *GEP = dyn_cast<GetElementPtrInst>(I)) {
@@ -4904,6 +4931,10 @@ static Value *simplifyGEPInst(Type *SrcTy, Value *Ptr,
   if (!isa<Constant>(Ptr) ||
       !all_of(Indices, [](Value *V) { return isa<Constant>(V); }))
     return nullptr;
+
+  if (!ConstantExpr::isSupportedGetElementPtr(SrcTy))
+    return ConstantFoldGetElementPtr(SrcTy, cast<Constant>(Ptr), InBounds,
+                                     std::nullopt, Indices);
 
   auto *CE = ConstantExpr::getGetElementPtr(SrcTy, cast<Constant>(Ptr), Indices,
                                             InBounds);
@@ -6175,13 +6206,6 @@ static Value *simplifyBinaryIntrinsic(Function *F, Value *Op0, Value *Op1,
       return Op0;
     if (isICmpTrue(Pred, Op1, Op0, Q.getWithoutUndef(), RecursionLimit))
       return Op1;
-
-    if (std::optional<bool> Imp =
-            isImpliedByDomCondition(Pred, Op0, Op1, Q.CxtI, Q.DL))
-      return *Imp ? Op0 : Op1;
-    if (std::optional<bool> Imp =
-            isImpliedByDomCondition(Pred, Op1, Op0, Q.CxtI, Q.DL))
-      return *Imp ? Op1 : Op0;
 
     break;
   }

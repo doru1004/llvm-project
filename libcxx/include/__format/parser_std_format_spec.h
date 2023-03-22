@@ -30,10 +30,11 @@
 #include <__format/unicode.h>
 #include <__iterator/concepts.h>
 #include <__iterator/readable_traits.h> // iter_value_t
+#include <__type_traits/common_type.h>
+#include <__type_traits/is_trivially_copyable.h>
 #include <__variant/monostate.h>
 #include <cstdint>
 #include <string_view>
-#include <type_traits>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header

@@ -330,6 +330,11 @@ enum NodeType : unsigned {
   // result being sign extended to 64 bit. These saturate out of range inputs.
   STRICT_FCVT_W_RV64 = ISD::FIRST_TARGET_STRICTFP_OPCODE,
   STRICT_FCVT_WU_RV64,
+  STRICT_FADD_VL,
+  STRICT_FSUB_VL,
+  STRICT_FMUL_VL,
+  STRICT_FDIV_VL,
+  STRICT_FP_EXTEND_VL,
 
   // WARNING: Do not add anything in the end unless you want the node to
   // have memop! In fact, starting from FIRST_TARGET_MEMORY_OPCODE all
@@ -388,6 +393,7 @@ public:
                           SmallVectorImpl<Use *> &Ops) const override;
   bool shouldScalarizeBinop(SDValue VecOp) const override;
   bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const override;
+  int getLegalZfaFPImm(const APFloat &Imm, EVT VT) const;
   bool isFPImmLegal(const APFloat &Imm, EVT VT,
                     bool ForCodeSize) const override;
   bool isExtractSubvectorCheap(EVT ResVT, EVT SrcVT,
@@ -485,10 +491,20 @@ public:
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                          EVT VT) const override;
 
+  bool shouldFormOverflowOp(unsigned Opcode, EVT VT,
+                            bool MathUsed) const override {
+    if (VT == MVT::i8 || VT == MVT::i16)
+      return false;
+
+    return TargetLowering::shouldFormOverflowOp(Opcode, VT, MathUsed);
+  }
+
   bool convertSetCCLogicToBitwiseLogic(EVT VT) const override {
     return VT.isScalarInteger();
   }
   bool convertSelectOfConstantsToMath(EVT VT) const override { return true; }
+
+  bool preferZeroCompareBranch() const override { return true; }
 
   bool shouldInsertFencesForAtomic(const Instruction *I) const override {
     return isa<LoadInst>(I) || isa<StoreInst>(I);
@@ -638,6 +654,16 @@ public:
 
   bool isVScaleKnownToBeAPowerOfTwo() const override;
 
+  bool getIndexedAddressParts(SDNode *Op, SDValue &Base, SDValue &Offset,
+                              ISD::MemIndexedMode &AM, bool &IsInc,
+                              SelectionDAG &DAG) const;
+  bool getPreIndexedAddressParts(SDNode *N, SDValue &Base, SDValue &Offset,
+                                 ISD::MemIndexedMode &AM,
+                                 SelectionDAG &DAG) const override;
+  bool getPostIndexedAddressParts(SDNode *N, SDNode *Op, SDValue &Base,
+                                  SDValue &Offset, ISD::MemIndexedMode &AM,
+                                  SelectionDAG &DAG) const override;
+
   bool isLegalScaleForGatherScatter(uint64_t Scale,
                                     uint64_t ElemSize) const override {
     // Scaled addressing not supported on indexed load/stores
@@ -705,6 +731,8 @@ private:
   SDValue lowerFPVECREDUCE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerINSERT_SUBVECTOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerEXTRACT_SUBVECTOR(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerVECTOR_DEINTERLEAVE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerVECTOR_INTERLEAVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSTEP_VECTOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerVECTOR_REVERSE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerVECTOR_SPLICE(SDValue Op, SelectionDAG &DAG) const;
@@ -743,6 +771,8 @@ private:
 
   SDValue lowerEH_DWARF_CFA(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerCTLZ_CTTZ_ZERO_UNDEF(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue lowerStrictFPExtend(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue expandUnalignedRVVLoad(SDValue Op, SelectionDAG &DAG) const;
   SDValue expandUnalignedRVVStore(SDValue Op, SelectionDAG &DAG) const;

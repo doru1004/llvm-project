@@ -591,10 +591,6 @@ private:
     return false;
   }
 
-  bool isCpp11AttributeSpecifier(const FormatToken &Tok) {
-    return isCppAttribute(Style.isCpp(), Tok);
-  }
-
   bool parseSquare() {
     if (!CurrentToken)
       return false;
@@ -617,7 +613,7 @@ private:
 
     const bool IsInnerSquare = Contexts.back().InCpp11AttributeSpecifier;
     const bool IsCpp11AttributeSpecifier =
-        isCpp11AttributeSpecifier(*Left) || IsInnerSquare;
+        isCppAttribute(Style.isCpp(), *Left) || IsInnerSquare;
 
     // Treat C# Attributes [STAThread] much like C++ attributes [[...]].
     bool IsCSharpAttributeSpecifier =
@@ -1226,7 +1222,8 @@ private:
           next();
         else
           consumeToken();
-        assert(CurrentToken);
+        if (!CurrentToken)
+          break;
         auto Previous = CurrentToken->getPreviousNonComment();
         assert(Previous);
         if (CurrentToken->is(tok::comma) && Previous->isNot(tok::kw_operator))
@@ -2244,7 +2241,7 @@ private:
     if (Tok.Next->isOneOf(tok::kw_noexcept, tok::kw_volatile, tok::kw_const,
                           tok::kw_requires, tok::kw_throw, tok::arrow,
                           Keywords.kw_override, Keywords.kw_final) ||
-        isCpp11AttributeSpecifier(*Tok.Next)) {
+        isCppAttribute(Style.isCpp(), *Tok.Next)) {
       return false;
     }
 
@@ -2404,7 +2401,7 @@ private:
 
     if (!NextToken ||
         NextToken->isOneOf(tok::arrow, tok::equal, tok::kw_noexcept, tok::comma,
-                           tok::r_paren) ||
+                           tok::r_paren, TT_RequiresClause) ||
         NextToken->canBePointerOrReferenceQualifier() ||
         (NextToken->is(tok::l_brace) && !NextToken->getNextNonComment())) {
       return TT_PointerOrReference;
@@ -2613,6 +2610,13 @@ public:
 
       // Consume operators with higher precedence.
       parse(Precedence + 1);
+
+      // Do not assign fake parenthesis to tokens that are part of an
+      // unexpanded macro call. The line within the macro call contains
+      // the parenthesis and commas, and we will not find operators within
+      // that structure.
+      if (Current && Current->MacroParent)
+        break;
 
       int CurrentPrecedence = getCurrentPrecedence();
 
@@ -3755,8 +3759,9 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
     if (Right.is(TT_BlockComment))
       return true;
     // foo() -> const Bar * override/final
-    if (Right.isOneOf(Keywords.kw_override, Keywords.kw_final,
-                      tok::kw_noexcept) &&
+    // S::foo() & noexcept/requires
+    if (Right.isOneOf(Keywords.kw_override, Keywords.kw_final, tok::kw_noexcept,
+                      TT_RequiresClause) &&
         !Right.is(TT_StartOfName)) {
       return true;
     }
@@ -4345,6 +4350,11 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
         (Left.is(TT_VerilogNumberBase) && Right.is(tok::numeric_constant))) {
       return false;
     }
+    // Don't add spaces between two at signs. Like in a coverage event.
+    // Don't add spaces between at and a sensitivity list like
+    // `@(posedge clk)`.
+    if (Left.is(tok::at) && Right.isOneOf(tok::l_paren, tok::star, tok::at))
+      return false;
     // Add space between the type name and dimension like `logic [1:0]`.
     if (Right.is(tok::l_square) &&
         Left.isOneOf(TT_VerilogDimensionedTypeName, Keywords.kw_function)) {
@@ -4389,8 +4399,12 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
       Left.isOneOf(TT_TrailingReturnArrow, TT_LambdaArrow)) {
     return true;
   }
-  if (Left.is(tok::comma) && !Right.is(TT_OverloadedOperatorLParen))
+  if (Left.is(tok::comma) && !Right.is(TT_OverloadedOperatorLParen) &&
+      // In an unexpanded macro call we only find the parentheses and commas
+      // in a line; the commas and closing parenthesis do not require a space.
+      (Left.Children.empty() || !Left.MacroParent)) {
     return true;
+  }
   if (Right.is(tok::comma))
     return false;
   if (Right.is(TT_ObjCBlockLParen))
@@ -4413,8 +4427,6 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
          Line.First->isOneOf(tok::kw_default, tok::kw_case))) {
       return Style.SpaceBeforeCaseColon;
     }
-    if (Line.First->isOneOf(tok::kw_default, tok::kw_case))
-      return Style.SpaceBeforeCaseColon;
     const FormatToken *Next = Right.getNextNonComment();
     if (!Next || Next->is(tok::semi))
       return false;
