@@ -6789,11 +6789,14 @@ struct AAHeapToStackFunction final : public AAHeapToStack {
     ChangeStatus HasChanged = ChangeStatus::UNCHANGED;
     Function *F = getAnchorScope();
     const auto *TLI = A.getInfoCache().getTargetLibraryInfoForFunction(*F);
-
+// DORU
     for (auto &It : AllocationInfos) {
       AllocationInfo &AI = *It.second;
-      if (AI.Status == AllocationInfo::INVALID)
+      AI.CB->dump();
+      if (AI.Status == AllocationInfo::INVALID) {
+        printf("AI.Status == AllocationInfo::INVALID is TRUE!\n");
         continue;
+      }
 
       for (CallBase *FreeCall : AI.PotentialFreeCalls) {
         LLVM_DEBUG(dbgs() << "H2S: Removing free call: " << *FreeCall << "\n");
@@ -7155,8 +7158,12 @@ ChangeStatus AAHeapToStackFunction::updateImpl(Attributor &A) {
   // their status perform the appropriate check(s).
   for (auto &It : AllocationInfos) {
     AllocationInfo &AI = *It.second;
-    if (AI.Status == AllocationInfo::INVALID)
+    printf("---------------------- \n");
+    AI.CB->dump();
+    if (AI.Status == AllocationInfo::INVALID) {
+      printf("---------- IS INVALID\n");
       continue;
+    }
 
     if (Value *Align = getAllocAlignment(AI.CB, TLI)) {
       std::optional<APInt> APAlign = getAPInt(A, *this, *Align);
@@ -7165,6 +7172,7 @@ ChangeStatus AAHeapToStackFunction::updateImpl(Attributor &A) {
         // on the allocation.
         LLVM_DEBUG(dbgs() << "[H2S] Unknown allocation alignment: " << *AI.CB
                           << "\n");
+        printf("    ==== SET INVALID 1\n");
         AI.Status = AllocationInfo::INVALID;
         Changed = ChangeStatus::CHANGED;
         continue;
@@ -7173,6 +7181,7 @@ ChangeStatus AAHeapToStackFunction::updateImpl(Attributor &A) {
           !APAlign->isPowerOf2()) {
         LLVM_DEBUG(dbgs() << "[H2S] Invalid allocation alignment: " << APAlign
                           << "\n");
+        printf("    ==== SET INVALID 2\n");
         AI.Status = AllocationInfo::INVALID;
         Changed = ChangeStatus::CHANGED;
         continue;
@@ -7190,6 +7199,7 @@ ChangeStatus AAHeapToStackFunction::updateImpl(Attributor &A) {
                    << MaxHeapToStackSize << "\n";
         });
 
+        printf("    ==== SET INVALID 3\n");
         AI.Status = AllocationInfo::INVALID;
         Changed = ChangeStatus::CHANGED;
         continue;
@@ -7205,6 +7215,7 @@ ChangeStatus AAHeapToStackFunction::updateImpl(Attributor &A) {
     case AllocationInfo::STACK_DUE_TO_FREE:
       if (FreeCheck(AI))
         break;
+      printf("    ==== SET INVALID 4\n");
       AI.Status = AllocationInfo::INVALID;
       Changed = ChangeStatus::CHANGED;
       break;

@@ -217,6 +217,7 @@ class CheckVarsEscapingDeclContext final
         OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD))
       return;
     VD = cast<ValueDecl>(VD->getCanonicalDecl());
+    VD->dump();
     // Use user-specified allocation.
     if (VD->hasAttrs() && VD->hasAttr<OMPAllocateDeclAttr>())
       return;
