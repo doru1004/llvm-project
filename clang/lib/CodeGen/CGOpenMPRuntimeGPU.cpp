@@ -217,15 +217,19 @@ class CheckVarsEscapingDeclContext final
         OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD))
       return;
     VD = cast<ValueDecl>(VD->getCanonicalDecl());
+    VD->dump();
     // Use user-specified allocation.
     if (VD->hasAttrs() && VD->hasAttr<OMPAllocateDeclAttr>())
       return;
     // Variables captured by value must be globalized.
     if (auto *CSI = CGF.CapturedStmtInfo) {
+      printf(" ==> THEN 1\n");
       if (const FieldDecl *FD = CSI->lookup(cast<VarDecl>(VD))) {
         // Check if need to capture the variable that was already captured by
         // value in the outer region.
+        printf(" ==> THEN 2\n");
         if (!IsForCombinedParallelRegion) {
+          printf(" ==> THEN 3\n");
           if (!FD->hasAttrs())
             return;
           const auto *Attr = FD->getAttr<OMPCaptureKindAttr>();
@@ -240,29 +244,44 @@ class CheckVarsEscapingDeclContext final
         if (!FD->getType()->isReferenceType()) {
           assert(!VD->getType()->isVariablyModifiedType() &&
                  "Parameter captured by value with variably modified type");
+          printf(" ==> THEN 4\n");
           EscapedParameters.insert(VD);
         } else if (!IsForCombinedParallelRegion) {
+          printf(" ==> THEN 5\n");
           return;
         }
       }
     }
+    printf(" ==> THEN 6: !CGF.CapturedStmtInfo = %d\n", !CGF.CapturedStmtInfo);
+    printf(" ==> THEN 6: IsForCombinedParallelRegion = %d\n", IsForCombinedParallelRegion);
+    printf(" ==> THEN 6: CGF.CapturedStmtInfo = %d\n", CGF.CapturedStmtInfo);
+    printf(" ==> THEN 6: VD->getType()->isReferenceType() = %d\n", VD->getType()->isReferenceType());
     if ((!CGF.CapturedStmtInfo ||
          (IsForCombinedParallelRegion && CGF.CapturedStmtInfo)) &&
         VD->getType()->isReferenceType())
       // Do not globalize variables with reference type.
       return;
-    if (VD->getType()->isVariablyModifiedType())
+    printf(" ==> THEN 7\n");
+    if (VD->getType()->isVariablyModifiedType()) {
+      printf(" ==> THEN 8\n");
       EscapedVariableLengthDecls.insert(VD);
-    else
+    } else {
+      printf(" ==> THEN 9\n");
       EscapedDecls.insert(VD);
+    }
   }
 
   void VisitValueDecl(const ValueDecl *VD) {
-    if (VD->getType()->isLValueReferenceType())
+    if (VD->getType()->isLValueReferenceType()) {
+      printf("VisitValueDecl\n");
       markAsEscaped(VD);
+    }
     if (const auto *VarD = dyn_cast<VarDecl>(VD)) {
       if (!isa<ParmVarDecl>(VarD) && VarD->hasInit()) {
         const bool SavedAllEscaped = AllEscaped;
+        if (VD->getType()->isLValueReferenceType()) {
+          printf("VisitValueDecl: AllEscaped set to True\n");
+        }
         AllEscaped = VD->getType()->isLValueReferenceType();
         Visit(VarD->getInit());
         AllEscaped = SavedAllEscaped;
@@ -308,6 +327,7 @@ class CheckVarsEscapingDeclContext final
               break;
           }
         }
+        printf("VisitOpenMPCapturedStmt\n");
         markAsEscaped(VD);
         if (isa<OMPCapturedExprDecl>(VD))
           VisitValueDecl(VD);
@@ -370,6 +390,7 @@ public:
     for (const CapturedStmt::Capture &C : S->captures()) {
       if (C.capturesVariable() && !C.capturesVariableByCopy()) {
         const ValueDecl *VD = C.getCapturedVar();
+        printf("VisitCapturedStmt\n");
         markAsEscaped(VD);
         if (isa<OMPCapturedExprDecl>(VD))
           VisitValueDecl(VD);
@@ -383,6 +404,7 @@ public:
       if (C.capturesVariable()) {
         if (C.getCaptureKind() == LCK_ByRef) {
           const ValueDecl *VD = C.getCapturedVar();
+          printf("VisitLambdaExpr\n");
           markAsEscaped(VD);
           if (E->isInitCapture(&C) || isa<OMPCapturedExprDecl>(VD))
             VisitValueDecl(VD);
@@ -396,6 +418,7 @@ public:
     for (const BlockDecl::Capture &C : E->getBlockDecl()->captures()) {
       if (C.isByRef()) {
         const VarDecl *VD = C.getVariable();
+        printf("VisitBlockExpr\n");
         markAsEscaped(VD);
         if (isa<OMPCapturedExprDecl>(VD) || VD->isInitCapture())
           VisitValueDecl(VD);
@@ -411,6 +434,7 @@ public:
       if (Arg->isLValue()) {
         const bool SavedAllEscaped = AllEscaped;
         AllEscaped = true;
+        printf("VisitCallExpr: AllEscaped set to True\n");
         Visit(Arg);
         AllEscaped = SavedAllEscaped;
       } else {
@@ -423,8 +447,10 @@ public:
     if (!E)
       return;
     const ValueDecl *VD = E->getDecl();
-    if (AllEscaped)
+    if (AllEscaped) {
+      printf("VisitDeclRefExpr\n");
       markAsEscaped(VD);
+    }
     if (isa<OMPCapturedExprDecl>(VD))
       VisitValueDecl(VD);
     else if (VD->isInitCapture())
@@ -436,6 +462,7 @@ public:
     if (E->getOpcode() == UO_AddrOf) {
       const bool SavedAllEscaped = AllEscaped;
       AllEscaped = true;
+      printf("VisitUnaryOperator: AllEscaped set to True\n");
       Visit(E->getSubExpr());
       AllEscaped = SavedAllEscaped;
     } else {
@@ -448,6 +475,8 @@ public:
     if (E->getCastKind() == CK_ArrayToPointerDecay) {
       const bool SavedAllEscaped = AllEscaped;
       AllEscaped = true;
+      E->dump();
+      printf("VisitImplicitCastExpr: AllEscaped set to True\n");
       Visit(E->getSubExpr());
       AllEscaped = SavedAllEscaped;
     } else {
@@ -3260,6 +3289,8 @@ llvm::Function *CGOpenMPRuntimeGPU::createParallelDataSharingWrapper(
 
 void CGOpenMPRuntimeGPU::emitFunctionProlog(CodeGenFunction &CGF,
                                               const Decl *D) {
+  printf("emitFunctionProlog\n");
+  printf("emitFunctionProlog: getDataSharingMode(CGM) != CGOpenMPRuntimeGPU::Generic = %d\n", getDataSharingMode(CGM) != CGOpenMPRuntimeGPU::Generic);
   if (getDataSharingMode(CGM) != CGOpenMPRuntimeGPU::Generic)
     return;
 
@@ -3277,13 +3308,16 @@ void CGOpenMPRuntimeGPU::emitFunctionProlog(CodeGenFunction &CGF,
   } else if (const auto *CD = dyn_cast<CapturedDecl>(D)) {
     Body = CD->getBody();
     NeedToDelayGlobalization = CGF.CapturedStmtInfo->getKind() == CR_OpenMP;
+    printf("emitFunctionProlog: delay globalization = %d\n", NeedToDelayGlobalization && getExecutionMode() == CGOpenMPRuntimeGPU::EM_SPMD);
     if (NeedToDelayGlobalization &&
         getExecutionMode() == CGOpenMPRuntimeGPU::EM_SPMD)
       return;
   }
+  printf("emitFunctionProlog: body check\n");
   if (!Body)
     return;
   CheckVarsEscapingDeclContext VarChecker(CGF, TeamAndReductions.second);
+  printf("emitFunctionProlog: check vars\n");
   VarChecker.Visit(Body);
   const RecordDecl *GlobalizedVarsRecord =
       VarChecker.getGlobalizedRecord(IsInTTDRegion);

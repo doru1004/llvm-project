@@ -661,6 +661,8 @@ ExprResult Sema::ImpCastExprToType(Expr *E, QualType Ty,
   if (ExprTy == TypeTy)
     return E;
 
+  printf("SEMA: ImpCastExprToType: =====>>>>> Kind == CK_ArrayToPointerDecay ===> %d\n", Kind == CK_ArrayToPointerDecay);
+  E->dump();
   if (Kind == CK_ArrayToPointerDecay) {
     // C++1z [conv.array]: The temporary materialization conversion is applied.
     // We also use this to fuel C++ DR1213, which applies to C++11 onwards.
@@ -701,6 +703,7 @@ ExprResult Sema::ImpCastExprToType(Expr *E, QualType Ty,
     }
   }
 
+  printf("SEMA: ImpCastExprToType: create implicit cast!\n");
   return ImplicitCastExpr::Create(Context, Ty, Kind, E, BasePath, VK,
                                   CurFPFeatureOverrides());
 }

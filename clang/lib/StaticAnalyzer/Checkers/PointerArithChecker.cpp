@@ -274,6 +274,7 @@ void PointerArithChecker::checkPostStmt(const CastExpr *CE,
 
 void PointerArithChecker::checkPreStmt(const CastExpr *CE,
                                        CheckerContext &C) const {
+  printf("Static Analyzer: CE->getCastKind() != CastKind::CK_ArrayToPointerDecay = %d\n", CE->getCastKind() != CastKind::CK_ArrayToPointerDecay);
   if (CE->getCastKind() != CastKind::CK_ArrayToPointerDecay)
     return;
 

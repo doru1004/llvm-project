@@ -4136,7 +4136,10 @@ bool Expr::isSameComparisonOperand(const Expr* E1, const Expr* E2) {
              DRE1->getDecl() == DRE2->getDecl();
     }
     case ImplicitCastExprClass: {
-      // Peel off implicit casts.
+      // Peel off implicit casts.i
+      E1->dump();
+      E2->dump();
+      printf("Expr::isSameComparisonOperand : ImplicitCastExprClass\n");
       while (true) {
         const auto *ICE1 = dyn_cast<ImplicitCastExpr>(E1);
         const auto *ICE2 = dyn_cast<ImplicitCastExpr>(E2);

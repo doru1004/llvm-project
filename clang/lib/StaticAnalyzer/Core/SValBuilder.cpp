@@ -385,6 +385,8 @@ std::optional<SVal> SValBuilder::getConstantVal(const Expr *E) {
     default:
       break;
     case CK_ArrayToPointerDecay:
+      CE->dump();
+      printf("Static Analyzer: SValBuilder\n");
     case CK_IntegralToPointer:
     case CK_NoOp:
     case CK_BitCast: {

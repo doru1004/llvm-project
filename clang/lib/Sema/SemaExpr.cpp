@@ -629,6 +629,9 @@ static void DiagnoseDirectIsaAccess(Sema &S, const ObjCIvarRefExpr *OIRE,
 
 ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   // Handle any placeholder expressions which made it here.
+  printf("SEMA: SemaExpr: DefaultLvalueConversion:\n");
+  E->dump();
+  printf("SEMA: SemaExpr: DefaultLvalueConversion: E->hasPlaceholderType() = %d\n", E->hasPlaceholderType());
   if (E->hasPlaceholderType()) {
     ExprResult result = CheckPlaceholderExpr(E);
     if (result.isInvalid()) return ExprError();
@@ -638,12 +641,14 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   // C++ [conv.lval]p1:
   //   A glvalue of a non-function, non-array type T can be
   //   converted to a prvalue.
+  printf("SEMA: SemaExpr: DefaultLvalueConversion: !E->isGLValue() = %d\n", !E->isGLValue());
   if (!E->isGLValue()) return E;
 
   QualType T = E->getType();
   assert(!T.isNull() && "r-value conversion on typeless expression?");
 
   // lvalue-to-rvalue conversion cannot be applied to function or array types.
+  printf("SEMA: SemaExpr: DefaultLvalueConversion: T->isFunctionType() = %d T->isArrayType() = %d\n", T->isFunctionType(), T->isArrayType());
   if (T->isFunctionType() || T->isArrayType())
     return E;
 
@@ -721,6 +726,8 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
 
   // C++ [conv.lval]p3:
   //   If T is cv std::nullptr_t, the result is a null pointer constant.
+  printf("CREATE CK_LValueToRValue 2\n");
+  E->dump();
   CastKind CK = T->isNullPtrType() ? CK_NullToPointer : CK_LValueToRValue;
   Res = ImplicitCastExpr::Create(Context, T, CK, E, nullptr, VK_PRValue,
                                  CurFPFeatureOverrides());

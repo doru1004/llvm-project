@@ -396,15 +396,20 @@ bool Sema::ConstantFoldAttrArgs(const AttributeCommonInfo &CI,
 
     // FIXME: Use DefaultFunctionArrayLValueConversion() in place of the logic
     // that adds implicit casts here.
-    if (E->getType()->isArrayType())
+    if (E->getType()->isArrayType()) {
+      printf("SEMA: ConstantFoldAttrArgs: CREATE IMPLICIT CAST of type clang::CK_ArrayToPointerDecay\n");
       E = ImpCastExprToType(E, Context.getPointerType(E->getType()),
                             clang::CK_ArrayToPointerDecay)
               .get();
+    }
+    printf("SEMA: ConstantFoldAttrArgs: E->getType()->isFunctionType() = %d\n", E->getType()->isFunctionType());
     if (E->getType()->isFunctionType())
       E = ImplicitCastExpr::Create(Context,
                                    Context.getPointerType(E->getType()),
                                    clang::CK_FunctionToPointerDecay, E, nullptr,
                                    VK_PRValue, FPOptionsOverride());
+    printf("SEMA: ConstantFoldAttrArgs: E->isLValue() = %d\n", E->isLValue());
+    printf("CREATE CK_LValueToRValue 4\n");
     if (E->isLValue())
       E = ImplicitCastExpr::Create(Context, E->getType().getNonReferenceType(),
                                    clang::CK_LValueToRValue, E, nullptr,

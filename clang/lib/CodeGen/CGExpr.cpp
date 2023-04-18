@@ -935,6 +935,7 @@ static llvm::Value *getArrayIndexingBound(CodeGenFunction &CGF,
   Base = Base->IgnoreParens();
 
   if (const auto *CE = dyn_cast<CastExpr>(Base)) {
+    printf("Get array indexing bound = %d\n", CE->getCastKind() == CK_ArrayToPointerDecay);
     if (CE->getCastKind() == CK_ArrayToPointerDecay &&
         !CE->getSubExpr()->isFlexibleArrayMemberLike(CGF.getContext(),
                                                      StrictFlexArraysLevel)) {
@@ -1108,6 +1109,8 @@ static Address EmitPointerWithAlignment(const Expr *E, LValueBaseInfo *BaseInfo,
 
     // Array-to-pointer decay.
     case CK_ArrayToPointerDecay:
+      printf("Emit CK_ArrayToPointerDecay variable:");
+      CE->getSubExpr()->dump();
       return CGF.EmitArrayToPointerDecay(CE->getSubExpr(), BaseInfo, TBAAInfo);
 
     // Derived-to-base conversions.
@@ -3667,14 +3670,21 @@ Address CodeGenFunction::EmitArrayToPointerDecay(const Expr *E,
 static const Expr *isSimpleArrayDecayOperand(const Expr *E) {
   // If this isn't just an array->pointer decay, bail out.
   const auto *CE = dyn_cast<CastExpr>(E);
-  if (!CE || CE->getCastKind() != CK_ArrayToPointerDecay)
+  printf("isSimpleArrayDecayOperand?\n");
+  E->dump();
+  if (!CE || CE->getCastKind() != CK_ArrayToPointerDecay) {
+    printf("NULLPTR 1\n");
     return nullptr;
+  }
 
   // If this is a decay from variable width array, bail out.
   const Expr *SubExpr = CE->getSubExpr();
-  if (SubExpr->getType()->isVariableArrayType())
+  if (SubExpr->getType()->isVariableArrayType()) {
+    printf("NULLPTR 2\n");
     return nullptr;
+  }
 
+  printf("Return subexpression!\n");
   return SubExpr;
 }
 

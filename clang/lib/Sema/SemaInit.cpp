@@ -7423,9 +7423,10 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
     if (auto *ASE = dyn_cast<ArraySubscriptExpr>(Init)) {
       Init = ASE->getBase();
       auto *ICE = dyn_cast<ImplicitCastExpr>(Init);
-      if (ICE && ICE->getCastKind() == CK_ArrayToPointerDecay)
+      if (ICE && ICE->getCastKind() == CK_ArrayToPointerDecay) {
+        printf("SEMA: SemaInit: visitLocalsRetainedByReferenceBinding\n");
         Init = ICE->getSubExpr();
-      else
+      } else
         // We can't lifetime extend through this but we might still find some
         // retained temporaries.
         return visitLocalsRetainedByInitializer(Path, Init, Visit, true,
@@ -7550,6 +7551,7 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
       case CK_LValueToRValue:
         // If we can match the lvalue to a const object, we can look at its
         // initializer.
+        printf("\n-------------------------------------------------- visitLocalsRetainedByInitializer: CK_LValueToRValue\n");
         Path.push_back({IndirectLocalPathEntry::LValToRVal, CE});
         return visitLocalsRetainedByReferenceBinding(
             Path, Init, RK_ReferenceBinding,
@@ -7596,6 +7598,7 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
       case CK_ArrayToPointerDecay:
         // Model array-to-pointer decay as taking the address of the array
         // lvalue.
+        printf("\n-------------------------------------------------- visitLocalsRetainedByInitializer: CK_ArrayToPointerDecay\n");
         Path.push_back({IndirectLocalPathEntry::AddressOf, CE});
         return visitLocalsRetainedByReferenceBinding(Path, CE->getSubExpr(),
                                                      RK_ReferenceBinding, Visit,
@@ -9101,6 +9104,7 @@ ExprResult InitializationSequence::Perform(Sema &S,
           auto Var = cast<VarDecl>(DRE->getDecl());
           // Case 1b and 1c
           // No cast from integer to sampler is needed.
+          printf("CREATE CK_LValueToRValue 1: !Var->hasGlobalStorage() = %d\n", !Var->hasGlobalStorage());
           if (!Var->hasGlobalStorage()) {
             CurInit = ImplicitCastExpr::Create(
                 S.Context, Step->Type, CK_LValueToRValue, Init,

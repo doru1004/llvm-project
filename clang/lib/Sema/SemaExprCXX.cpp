@@ -4357,6 +4357,7 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   }
 
   case ICK_Array_To_Pointer:
+    printf("======= IMPLICIT CONVERSION!!! ===\n");
     FromType = Context.getArrayDecayedType(FromType);
     From = ImpCastExprToType(From, FromType, CK_ArrayToPointerDecay, VK_PRValue,
                              /*BasePath=*/nullptr, CCK)

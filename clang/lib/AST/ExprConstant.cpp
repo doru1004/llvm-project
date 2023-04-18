@@ -4621,6 +4621,7 @@ static bool handleIncDec(EvalInfo &Info, const Expr *E, const LValue &LVal,
 /// Build an lvalue for the object argument of a member function call.
 static bool EvaluateObjectArgument(EvalInfo &Info, const Expr *Object,
                                    LValue &This) {
+  printf("EvaluateObjectArgument(\n");
   if (Object->getType()->isPointerType() && Object->isPRValue())
     return EvaluatePointer(Object, This, Info);
 
@@ -6797,6 +6798,7 @@ bool HandleOperatorDeleteCall(EvalInfo &Info, const CallExpr *E) {
   }
 
   LValue Pointer;
+  printf("HandleOperatorDeleteCall(\n");
   if (!EvaluatePointer(E->getArg(0), Pointer, Info))
     return false;
   for (unsigned I = 1, N = E->getNumArgs(); I != N; ++I)
@@ -7663,6 +7665,8 @@ public:
       FD = Member;
     } else if (CalleeType->isFunctionPointerType()) {
       LValue CalleeLV;
+      printf("handleCallExpr(\n");
+      Callee->dump();
       if (!EvaluatePointer(Callee, CalleeLV, Info))
         return false;
 
@@ -8037,6 +8041,7 @@ protected:
   }
 
   bool evaluatePointer(const Expr *E, LValue &Result) {
+    printf("CALLED FROM: LValueExprEvaluatorBase\n");
     return EvaluatePointer(E, Result, this->Info, InvalidBaseOK);
   }
 
@@ -8711,6 +8716,7 @@ class PointerExprEvaluator
   }
 
   bool evaluatePointer(const Expr *E, LValue &Result) {
+    printf("CALLED FROM: PointerExprEvaluator\n");
     return EvaluatePointer(E, Result, Info, InvalidBaseOK);
   }
 
@@ -8982,6 +8988,9 @@ bool PointerExprEvaluator::VisitCastExpr(const CastExpr *E) {
   }
 
   case CK_ArrayToPointerDecay: {
+    SubExpr->dump();
+    printf("PointerExprEvaluator::VisitCastExpr: CK_ArrayToPointerDecay\n");
+    printf("==> SubExpr->isGLValue() = %d\n", SubExpr->isGLValue());
     if (SubExpr->isGLValue()) {
       if (!evaluateLValue(SubExpr, Result))
         return false;
@@ -8993,10 +9002,15 @@ bool PointerExprEvaluator::VisitCastExpr(const CastExpr *E) {
     }
     // The result is a pointer to the first element of the array.
     auto *AT = Info.Ctx.getAsArrayType(SubExpr->getType());
-    if (auto *CAT = dyn_cast<ConstantArrayType>(AT))
+    if (auto *CAT = dyn_cast<ConstantArrayType>(AT)) {
+      printf("==> Is CAT \n");
+      // printf("==> Is CAT %s\n", SubExpr->getType().getBaseTypeIdentifier()->getName().str().c_str());
+      // assert(false);
       Result.addArray(Info, E, CAT);
-    else
+    } else {
+      printf("==> Is NOT CAT \n");
       Result.addUnsizedArray(Info, E, AT->getElementType());
+    }
     return true;
   }
 

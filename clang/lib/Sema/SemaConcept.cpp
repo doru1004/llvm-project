@@ -395,6 +395,7 @@ static ExprResult calculateConstraintSatisfaction(
         // non-PRValue categories, else we fail to extend the lifetime of
         // temporaries, and that fails the constant expression check.
         if (!SubstitutedExpression.get()->isPRValue())
+          printf("CREATE CK_LValueToRValue 3\n");
           SubstitutedExpression = ImplicitCastExpr::Create(
               S.Context, SubstitutedExpression.get()->getType(),
               CK_LValueToRValue, SubstitutedExpression.get(),
