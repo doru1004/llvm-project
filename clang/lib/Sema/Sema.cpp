@@ -661,6 +661,23 @@ ExprResult Sema::ImpCastExprToType(Expr *E, QualType Ty,
   if (ExprTy == TypeTy)
     return E;
 
+  // Doru
+  if (const auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+    if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+      if (VD->getName().str() == "another_local_stack" ||
+          VD->getName().str() == "stack" ||
+          VD->getName().str() == "localPadding") {
+        printf("\n\nSEMA: ImpCastExprToType: =====>>>>> Kind == CK_ArrayToPointerDecay ===> %d\n", Kind == CK_ArrayToPointerDecay);
+        E->dump();
+
+        if (VD->getName().str() != "another_local_stack") {
+          auto *FD = dyn_cast_or_null<FunctionDecl>(VD->getParentFunctionOrMethod());
+          FD->dump();
+        }
+      }
+    }
+  }
+
   if (Kind == CK_ArrayToPointerDecay) {
     // C++1z [conv.array]: The temporary materialization conversion is applied.
     // We also use this to fuel C++ DR1213, which applies to C++11 onwards.
@@ -701,6 +718,15 @@ ExprResult Sema::ImpCastExprToType(Expr *E, QualType Ty,
     }
   }
 
+  if (const auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+    if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+      if (VD->getName().str() == "another_local_stack" ||
+          VD->getName().str() == "stack" ||
+          VD->getName().str() == "localPadding") {
+        printf("SEMA: ImpCastExprToType: create implicit cast!\n");
+      }
+    }
+  }
   return ImplicitCastExpr::Create(Context, Ty, Kind, E, BasePath, VK,
                                   CurFPFeatureOverrides());
 }

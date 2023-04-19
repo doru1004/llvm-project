@@ -628,6 +628,45 @@ static void DiagnoseDirectIsaAccess(Sema &S, const ObjCIvarRefExpr *OIRE,
 }
 
 ExprResult Sema::DefaultLvalueConversion(Expr *E) {
+  // Doru
+  if (ImplicitCastExpr *ImpCast = dyn_cast<ImplicitCastExpr>(E)) {
+    if (const auto *DRE = dyn_cast<DeclRefExpr>(ImpCast->getSubExpr())) {
+      if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+        if (VD->getName().str() == "another_local_stack" ||
+            VD->getName().str() == "stack" ||
+            VD->getName().str() == "localPadding") {
+          printf("SEMA: DefaultLvalueConversion:\n");
+          E->dump();
+          printf("  SEMA: DefaultLvalueConversion: E->hasPlaceholderType() = %d\n", E->hasPlaceholderType());
+          printf("  SEMA: DefaultLvalueConversion: !E->isGLValue() = %d\n", !E->isGLValue());
+          QualType T = E->getType();
+          printf("  SEMA: DefaultLvalueConversion: T->isFunctionType() = %d T->isArrayType() = %d\n", T->isFunctionType(), T->isArrayType());
+          printf("  SEMA: DefaultLvalueConversion: Excelude certain expr = %d\n", getLangOpts().CPlusPlus &&
+      (E->getType() == Context.OverloadTy ||
+       T->isDependentType() ||
+       T->isRecordType()));
+          
+        }
+      }
+    }
+  } else if (const auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+    if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+      if (VD->getName().str() == "another_local_stack" ||
+          VD->getName().str() == "stack" ||
+          VD->getName().str() == "localPadding") {
+        printf("SEMA: DefaultLvalueConversion:\n");
+        E->dump();
+        printf("  SEMA: DefaultLvalueConversion: E->hasPlaceholderType() = %d\n", E->hasPlaceholderType());
+        printf("  SEMA: DefaultLvalueConversion: !E->isGLValue() = %d\n", !E->isGLValue());
+        QualType T = E->getType();
+        printf("  SEMA: DefaultLvalueConversion: T->isFunctionType() = %d T->isArrayType() = %d\n", T->isFunctionType(), T->isArrayType());
+        printf("  SEMA: DefaultLvalueConversion: Excelude certain expr = %d\n", getLangOpts().CPlusPlus &&
+    (E->getType() == Context.OverloadTy ||
+      T->isDependentType() ||
+      T->isRecordType()));
+      }
+    }
+  }
   // Handle any placeholder expressions which made it here.
   if (E->hasPlaceholderType()) {
     ExprResult result = CheckPlaceholderExpr(E);
@@ -721,6 +760,16 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
 
   // C++ [conv.lval]p3:
   //   If T is cv std::nullptr_t, the result is a null pointer constant.
+  if (const auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+    if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+      if (VD->getName().str() == "another_local_stack" ||
+          VD->getName().str() == "stack" ||
+          VD->getName().str() == "localPadding") {
+        printf("SEMA: DefaultLvalueConversion: Convert to CK_LValueToRValue if not nullptr type %d\n", T->isNullPtrType());
+        E->dump();
+      }
+    }
+  }
   CastKind CK = T->isNullPtrType() ? CK_NullToPointer : CK_LValueToRValue;
   Res = ImplicitCastExpr::Create(Context, T, CK, E, nullptr, VK_PRValue,
                                  CurFPFeatureOverrides());
