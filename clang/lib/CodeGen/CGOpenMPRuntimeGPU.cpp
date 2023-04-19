@@ -209,6 +209,7 @@ class CheckVarsEscapingDeclContext final
   RecordDecl *GlobalizedRD = nullptr;
   llvm::SmallDenseMap<const ValueDecl *, const FieldDecl *> MappedDeclsFields;
   bool AllEscaped = false;
+  int Count = 0;
   bool IsForCombinedParallelRegion = false;
 
   void markAsEscaped(const ValueDecl *VD) {
@@ -435,6 +436,8 @@ public:
       return;
     if (E->getOpcode() == UO_AddrOf) {
       const bool SavedAllEscaped = AllEscaped;
+      printf("Visit expression under &:\n");
+      E->dump();
       AllEscaped = true;
       Visit(E->getSubExpr());
       AllEscaped = SavedAllEscaped;
@@ -447,7 +450,27 @@ public:
       return;
     if (E->getCastKind() == CK_ArrayToPointerDecay) {
       const bool SavedAllEscaped = AllEscaped;
-      AllEscaped = true;
+      // printf("Visit CK_ArrayToPointerDecay expression:\n");
+      // if (const auto *DRE = dyn_cast<DeclRefExpr>(E->getSubExpr())) {
+      //   if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+      //     if (VD->getName().str() == "another_local_stack" ||
+      //         VD->getName().str() == "stack" ||
+      //         VD->getName().str() == "localPadding") {
+      //       E->dump();
+
+      //       Count++;
+      //       // if (Count == 2) {
+      //       //   assert(false);
+      //       // }
+
+      //       if (VD->getName().str() != "another_local_stack") {
+      //         auto *FD = dyn_cast_or_null<FunctionDecl>(VD->getParentFunctionOrMethod());
+      //         FD->dump();
+      //       }
+      //     }
+      //   }
+      // }
+      // AllEscaped = true;
       Visit(E->getSubExpr());
       AllEscaped = SavedAllEscaped;
     } else {
