@@ -445,14 +445,7 @@ public:
   void VisitImplicitCastExpr(const ImplicitCastExpr *E) {
     if (!E)
       return;
-    if (E->getCastKind() == CK_ArrayToPointerDecay) {
-      const bool SavedAllEscaped = AllEscaped;
-      AllEscaped = true;
-      Visit(E->getSubExpr());
-      AllEscaped = SavedAllEscaped;
-    } else {
-      Visit(E->getSubExpr());
-    }
+    Visit(E->getSubExpr());
   }
   void VisitExpr(const Expr *E) {
     if (!E)
