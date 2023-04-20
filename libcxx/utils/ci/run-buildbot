@@ -490,7 +490,6 @@ apple-system-backdeployment-assertions-*)
     PARAMS+=";cxx_runtime_root=${OSX_ROOTS}/macOS/libc++/${DEPLOYMENT_TARGET}"
     PARAMS+=";abi_runtime_root=${OSX_ROOTS}/macOS/libc++abi/${DEPLOYMENT_TARGET}"
     PARAMS+=";unwind_runtime_root=${OSX_ROOTS}/macOS/libunwind/${DEPLOYMENT_TARGET}"
-    PARAMS+=";use_system_cxx_lib=True"
     PARAMS+=";enable_assertions=True"
 
     generate-cmake -C "${MONOREPO_ROOT}/libcxx/cmake/caches/Apple.cmake" \
@@ -529,7 +528,6 @@ apple-system-backdeployment-*)
     PARAMS+=";cxx_runtime_root=${OSX_ROOTS}/macOS/libc++/${DEPLOYMENT_TARGET}"
     PARAMS+=";abi_runtime_root=${OSX_ROOTS}/macOS/libc++abi/${DEPLOYMENT_TARGET}"
     PARAMS+=";unwind_runtime_root=${OSX_ROOTS}/macOS/libunwind/${DEPLOYMENT_TARGET}"
-    PARAMS+=";use_system_cxx_lib=True"
 
     generate-cmake -C "${MONOREPO_ROOT}/libcxx/cmake/caches/Apple.cmake" \
                    -DLIBCXX_TEST_CONFIG="apple-libc++-backdeployment.cfg.in" \
@@ -627,8 +625,7 @@ mingw-dll)
           -DCMAKE_C_COMPILER=x86_64-w64-mingw32-clang \
           -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-clang++ \
           -C "${MONOREPO_ROOT}/libcxx/cmake/caches/MinGW.cmake"
-    echo "+++ Running the libc++ tests"
-    ${NINJA} -vC "${BUILD_DIR}" check-cxx
+    check-runtimes
 ;;
 mingw-static)
     clean
@@ -638,8 +635,7 @@ mingw-static)
           -C "${MONOREPO_ROOT}/libcxx/cmake/caches/MinGW.cmake" \
           -DLIBCXX_ENABLE_SHARED=OFF \
           -DLIBUNWIND_ENABLE_SHARED=OFF
-    echo "+++ Running the libc++ tests"
-    ${NINJA} -vC "${BUILD_DIR}" check-cxx
+    check-runtimes
 ;;
 mingw-dll-i686)
     clean
@@ -647,8 +643,7 @@ mingw-dll-i686)
           -DCMAKE_C_COMPILER=i686-w64-mingw32-clang \
           -DCMAKE_CXX_COMPILER=i686-w64-mingw32-clang++ \
           -C "${MONOREPO_ROOT}/libcxx/cmake/caches/MinGW.cmake"
-    echo "+++ Running the libc++ tests"
-    ${NINJA} -vC "${BUILD_DIR}" check-cxx
+    check-runtimes
 ;;
 aix)
     clean

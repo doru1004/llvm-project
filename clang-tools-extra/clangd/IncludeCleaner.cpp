@@ -11,6 +11,7 @@
 #include "Diagnostics.h"
 #include "Headers.h"
 #include "ParsedAST.h"
+#include "Preamble.h"
 #include "Protocol.h"
 #include "SourceCode.h"
 #include "URI.h"
@@ -51,9 +52,11 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Regex.h"
+#include <cassert>
 #include <iterator>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace clang {
@@ -110,12 +113,12 @@ static bool mayConsiderUnused(const Inclusion &Inc, ParsedAST &AST,
       return false;
     // Check if main file is the public interface for a private header. If so we
     // shouldn't diagnose it as unused.
-    if(auto PHeader = PI->getPublic(*FE); !PHeader.empty()) {
+    if (auto PHeader = PI->getPublic(*FE); !PHeader.empty()) {
       PHeader = PHeader.trim("<>\"");
       // Since most private -> public mappings happen in a verbatim way, we
       // check textually here. This might go wrong in presence of symlinks or
       // header mappings. But that's not different than rest of the places.
-      if(AST.tuPath().endswith(PHeader))
+      if (AST.tuPath().endswith(PHeader))
         return false;
     }
   }
@@ -266,7 +269,6 @@ std::vector<Diag> generateUnusedIncludeDiagnostics(
 }
 } // namespace
 
-
 std::vector<include_cleaner::SymbolReference>
 collectMacroReferences(ParsedAST &AST) {
   const auto &SM = AST.getSourceManager();
@@ -315,8 +317,8 @@ convertIncludes(const SourceManager &SM,
 std::string spellHeader(ParsedAST &AST, const FileEntry *MainFile,
                         include_cleaner::Header Provider) {
   if (Provider.kind() == include_cleaner::Header::Physical) {
-    if (auto CanonicalPath =
-            getCanonicalPath(Provider.physical(), AST.getSourceManager())) {
+    if (auto CanonicalPath = getCanonicalPath(Provider.physical()->getLastRef(),
+                                              AST.getSourceManager())) {
       std::string SpelledHeader =
           llvm::cantFail(URI::includeSpelling(URI::create(*CanonicalPath)));
       if (!SpelledHeader.empty())
@@ -359,6 +361,7 @@ IncludeCleanerFindings computeIncludeCleanerFindings(ParsedAST &AST) {
   include_cleaner::Includes ConvertedIncludes =
       convertIncludes(SM, Includes.MainFileIncludes);
   const FileEntry *MainFile = SM.getFileEntryForID(SM.getMainFileID());
+  auto *PreamblePatch = PreamblePatch::getPatchEntry(AST.tuPath(), SM);
 
   std::vector<include_cleaner::SymbolReference> Macros =
       collectMacroReferences(AST);
@@ -373,7 +376,7 @@ IncludeCleanerFindings computeIncludeCleanerFindings(ParsedAST &AST) {
         bool Satisfied = false;
         for (const auto &H : Providers) {
           if (H.kind() == include_cleaner::Header::Physical &&
-              H.physical() == MainFile) {
+              (H.physical() == MainFile || H.physical() == PreamblePatch)) {
             Satisfied = true;
             continue;
           }
@@ -398,9 +401,18 @@ IncludeCleanerFindings computeIncludeCleanerFindings(ParsedAST &AST) {
         // FIXME: Use presumed locations to map such usages back to patched
         // locations safely.
         auto Loc = SM.getFileLoc(Ref.RefLocation);
-        const auto *Token = AST.getTokens().spelledTokenAt(Loc);
-        MissingIncludeDiagInfo DiagInfo{Ref.Target, Token->range(SM),
-                                        Providers};
+        // File locations can be outside of the main file if macro is expanded
+        // through an #include.
+        while (SM.getFileID(Loc) != SM.getMainFileID())
+          Loc = SM.getIncludeLoc(SM.getFileID(Loc));
+        auto TouchingTokens =
+            syntax::spelledTokensTouching(Loc, AST.getTokens());
+        assert(!TouchingTokens.empty());
+        // Loc points to the start offset of the ref token, here we use the last
+        // element of the TouchingTokens, e.g. avoid getting the "::" for
+        // "ns::^abc".
+        MissingIncludeDiagInfo DiagInfo{
+            Ref.Target, TouchingTokens.back().range(SM), Providers};
         MissingIncludes.push_back(std::move(DiagInfo));
       });
   std::vector<const Inclusion *> UnusedIncludes =
@@ -432,5 +444,15 @@ std::vector<Diag> issueIncludeCleanerDiagnostics(ParsedAST &AST,
   return Result;
 }
 
+std::optional<include_cleaner::Header>
+firstMatchedProvider(const include_cleaner::Includes &Includes,
+                     llvm::ArrayRef<include_cleaner::Header> Providers) {
+  for (const auto &H : Providers) {
+    if (!Includes.match(H).empty())
+      return H;
+  }
+  // No match for this provider in the includes list.
+  return std::nullopt;
+}
 } // namespace clangd
 } // namespace clang
