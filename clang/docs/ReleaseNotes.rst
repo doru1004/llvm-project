@@ -207,8 +207,8 @@ Improvements to Clang's diagnostics
 - Diagnostic notes and fix-its are now generated for ``ifunc``/``alias`` attributes
   which point to functions whose names are mangled.
 - Diagnostics relating to macros on the command line of a preprocessed assembly
-  file are now reported as coming from the file ``<command line>`` instead of
-  ``<built-in>``.
+  file or precompiled header are now reported as coming from the file
+  ``<command line>`` instead of ``<built-in>``.
 - Clang constexpr evaluator now provides a more concise diagnostic when calling
   function pointer that is known to be null.
 - Clang now avoids duplicate warnings on unreachable ``[[fallthrough]];`` statements
@@ -231,8 +231,6 @@ Improvements to Clang's diagnostics
 - ``-Wformat`` now recognizes ``%lb`` for the ``printf``/``scanf`` family of
   functions.
   (`#62247: <https://github.com/llvm/llvm-project/issues/62247>`_).
-- ``-Wcast-qual`` now triggers on function-style casts.
-  (`#62083 <https://github.com/llvm/llvm-project/issues/62083>`_)
 
 Bug Fixes in This Version
 -------------------------
