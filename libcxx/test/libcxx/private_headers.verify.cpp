@@ -614,6 +614,7 @@ END-SCRIPT
 #include <__ranges/views.h> // expected-error@*:* {{use of private header from outside its module: '__ranges/views.h'}}
 #include <__ranges/zip_view.h> // expected-error@*:* {{use of private header from outside its module: '__ranges/zip_view.h'}}
 #include <__split_buffer> // expected-error@*:* {{use of private header from outside its module: '__split_buffer'}}
+#include <__std_mbstate_t.h> // expected-error@*:* {{use of private header from outside its module: '__std_mbstate_t.h'}}
 #include <__string/char_traits.h> // expected-error@*:* {{use of private header from outside its module: '__string/char_traits.h'}}
 #include <__string/constexpr_c_functions.h> // expected-error@*:* {{use of private header from outside its module: '__string/constexpr_c_functions.h'}}
 #include <__string/extern_template_lists.h> // expected-error@*:* {{use of private header from outside its module: '__string/extern_template_lists.h'}}
@@ -730,6 +731,7 @@ END-SCRIPT
 #include <__type_traits/is_trivially_copyable.h> // expected-error@*:* {{use of private header from outside its module: '__type_traits/is_trivially_copyable.h'}}
 #include <__type_traits/is_trivially_default_constructible.h> // expected-error@*:* {{use of private header from outside its module: '__type_traits/is_trivially_default_constructible.h'}}
 #include <__type_traits/is_trivially_destructible.h> // expected-error@*:* {{use of private header from outside its module: '__type_traits/is_trivially_destructible.h'}}
+#include <__type_traits/is_trivially_lexicographically_comparable.h> // expected-error@*:* {{use of private header from outside its module: '__type_traits/is_trivially_lexicographically_comparable.h'}}
 #include <__type_traits/is_trivially_move_assignable.h> // expected-error@*:* {{use of private header from outside its module: '__type_traits/is_trivially_move_assignable.h'}}
 #include <__type_traits/is_trivially_move_constructible.h> // expected-error@*:* {{use of private header from outside its module: '__type_traits/is_trivially_move_constructible.h'}}
 #include <__type_traits/is_unbounded_array.h> // expected-error@*:* {{use of private header from outside its module: '__type_traits/is_unbounded_array.h'}}
