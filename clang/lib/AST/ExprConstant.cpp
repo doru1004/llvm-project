@@ -2163,13 +2163,12 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
     }
   }
 
-  if (auto *FD = dyn_cast_or_null<FunctionDecl>(BaseVD)) {
-    if (FD->isConsteval()) {
-      Info.FFDiag(Loc, diag::note_consteval_address_accessible)
-          << !Type->isAnyPointerType();
-      Info.Note(FD->getLocation(), diag::note_declared_at);
-      return false;
-    }
+  if (auto *FD = dyn_cast_or_null<FunctionDecl>(BaseVD);
+      FD && FD->isImmediateFunction()) {
+    Info.FFDiag(Loc, diag::note_consteval_address_accessible)
+        << !Type->isAnyPointerType();
+    Info.Note(FD->getLocation(), diag::note_declared_at);
+    return false;
   }
 
   // Check that the object is a global. Note that the fake 'this' object we
@@ -2305,7 +2304,7 @@ static bool CheckMemberPointerConstantExpression(EvalInfo &Info,
   const auto *FD = dyn_cast_or_null<CXXMethodDecl>(Member);
   if (!FD)
     return true;
-  if (FD->isConsteval()) {
+  if (FD->isImmediateFunction()) {
     Info.FFDiag(Loc, diag::note_consteval_address_accessible) << /*pointer*/ 0;
     Info.Note(FD->getLocation(), diag::note_declared_at);
     return false;
@@ -9025,8 +9024,7 @@ static CharUnits GetAlignOfType(EvalInfo &Info, QualType T,
   // C++ [expr.alignof]p3:
   //     When alignof is applied to a reference type, the result is the
   //     alignment of the referenced type.
-  if (const ReferenceType *Ref = T->getAs<ReferenceType>())
-    T = Ref->getPointeeType();
+  T = T.getNonReferenceType();
 
   if (T.getQualifiers().hasUnaligned())
     return CharUnits::One();
@@ -11291,7 +11289,6 @@ EvaluateBuiltinClassifyType(QualType T, const LangOptions &LangOpts) {
   assert(!T->isDependentType() && "unexpected dependent type");
 
   QualType CanTy = T.getCanonicalType();
-  const BuiltinType *BT = dyn_cast<BuiltinType>(CanTy);
 
   switch (CanTy->getTypeClass()) {
 #define TYPE(ID, BASE)
@@ -11304,7 +11301,7 @@ EvaluateBuiltinClassifyType(QualType T, const LangOptions &LangOpts) {
       llvm_unreachable("unexpected non-canonical or dependent type");
 
   case Type::Builtin:
-    switch (BT->getKind()) {
+      switch (cast<BuiltinType>(CanTy)->getKind()) {
 #define BUILTIN_TYPE(ID, SINGLETON_ID)
 #define SIGNED_TYPE(ID, SINGLETON_ID) \
     case BuiltinType::ID: return GCCTypeClass::Integer;
@@ -13711,12 +13708,13 @@ bool IntExprEvaluator::VisitCastExpr(const CastExpr *E) {
           Info.Ctx.getDiagnostics().Report(
               E->getExprLoc(), diag::warn_constexpr_unscoped_enum_out_of_range)
               << llvm::toString(Result.getInt(), 10) << Min.getSExtValue()
-              << Max.getSExtValue();
+              << Max.getSExtValue() << ED;
         else if (!ED->getNumNegativeBits() && ConstexprVar &&
                  Max.ult(Result.getInt().getZExtValue()))
-          Info.Ctx.getDiagnostics().Report(E->getExprLoc(),
-                                       diag::warn_constexpr_unscoped_enum_out_of_range)
-	    << llvm::toString(Result.getInt(),10) << Min.getZExtValue() << Max.getZExtValue();
+          Info.Ctx.getDiagnostics().Report(
+              E->getExprLoc(), diag::warn_constexpr_unscoped_enum_out_of_range)
+              << llvm::toString(Result.getInt(), 10) << Min.getZExtValue()
+              << Max.getZExtValue() << ED;
       }
     }
 
@@ -15067,6 +15065,7 @@ static bool Evaluate(APValue &Result, EvalInfo &Info, const Expr *E) {
           E, Unqual, ScopeKind::FullExpression, LV);
       if (!EvaluateAtomic(E, &LV, Value, Info))
         return false;
+      Result = Value;
     } else {
       if (!EvaluateAtomic(E, nullptr, Result, Info))
         return false;

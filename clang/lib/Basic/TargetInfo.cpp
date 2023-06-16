@@ -64,6 +64,7 @@ TargetInfo::TargetInfo(const llvm::Triple &T) : Triple(T) {
   HasIbm128 = false;
   HasFloat16 = false;
   HasBFloat16 = false;
+  HasFullBFloat16 = false;
   HasLongDouble = true;
   HasFPReturn = true;
   HasStrictFP = false;
@@ -527,6 +528,8 @@ bool TargetInfo::initFeatureMap(
     // Apply the feature via the target.
     if (Name[0] != '+' && Name[0] != '-')
       Diags.Report(diag::warn_fe_backend_invalid_feature_flag) << Name;
+    else if (isReadOnlyFeature(Name.substr(1)))
+      Diags.Report(diag::warn_fe_backend_readonly_feature_flag) << Name;
     else
       setFeatureEnabled(Features, Name.substr(1), Name[0] == '+');
   }

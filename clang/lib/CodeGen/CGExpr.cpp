@@ -33,9 +33,11 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsWebAssembly.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/MatrixBuilder.h"
+#include "llvm/Passes/OptimizationLevel.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Path.h"
@@ -1777,7 +1779,7 @@ llvm::Value *CodeGenFunction::EmitLoadOfScalar(Address Addr, bool Volatile,
   if (isNontemporal) {
     llvm::MDNode *Node = llvm::MDNode::get(
         Load->getContext(), llvm::ConstantAsMetadata::get(Builder.getInt32(1)));
-    Load->setMetadata(CGM.getModule().getMDKindID("nontemporal"), Node);
+    Load->setMetadata(llvm::LLVMContext::MD_nontemporal, Node);
   }
 
   CGM.DecorateInstructionWithTBAA(Load, TBAAInfo);
@@ -1916,7 +1918,7 @@ void CodeGenFunction::EmitStoreOfScalar(llvm::Value *Value, Address Addr,
     llvm::MDNode *Node =
         llvm::MDNode::get(Store->getContext(),
                           llvm::ConstantAsMetadata::get(Builder.getInt32(1)));
-    Store->setMetadata(CGM.getModule().getMDKindID("nontemporal"), Node);
+    Store->setMetadata(llvm::LLVMContext::MD_nontemporal, Node);
   }
 
   CGM.DecorateInstructionWithTBAA(Store, TBAAInfo);
@@ -5364,8 +5366,30 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType, const CGCallee &OrigCallee
 
       llvm::Value *CalleePtr = Callee.getFunctionPointer();
 
+      // On 32-bit Arm, the low bit of a function pointer indicates whether
+      // it's using the Arm or Thumb instruction set. The actual first
+      // instruction lives at the same address either way, so we must clear
+      // that low bit before using the function address to find the prefix
+      // structure.
+      //
+      // This applies to both Arm and Thumb target triples, because
+      // either one could be used in an interworking context where it
+      // might be passed function pointers of both types.
+      llvm::Value *AlignedCalleePtr;
+      if (CGM.getTriple().isARM() || CGM.getTriple().isThumb()) {
+        llvm::Value *CalleeAddress =
+            Builder.CreatePtrToInt(CalleePtr, IntPtrTy);
+        llvm::Value *Mask = llvm::ConstantInt::get(IntPtrTy, ~1);
+        llvm::Value *AlignedCalleeAddress =
+            Builder.CreateAnd(CalleeAddress, Mask);
+        AlignedCalleePtr =
+            Builder.CreateIntToPtr(AlignedCalleeAddress, CalleePtr->getType());
+      } else {
+        AlignedCalleePtr = CalleePtr;
+      }
+
       llvm::Value *CalleePrefixStruct = Builder.CreateBitCast(
-          CalleePtr, llvm::PointerType::getUnqual(PrefixStructTy));
+          AlignedCalleePtr, llvm::PointerType::getUnqual(PrefixStructTy));
       llvm::Value *CalleeSigPtr =
           Builder.CreateConstGEP2_32(PrefixStructTy, CalleePrefixStruct, -1, 0);
       llvm::Value *CalleeSig =

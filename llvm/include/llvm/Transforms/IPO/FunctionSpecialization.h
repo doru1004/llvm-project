@@ -184,13 +184,11 @@ public:
 
   ~FunctionSpecializer();
 
-  bool isClonedFunction(Function *F) { return Specializations.count(F); }
-
   bool run();
 
   InstCostVisitor getInstCostVisitorFor(Function *F) {
-    auto &BFI = (GetBFI)(*F);
-    auto &TTI = (GetTTI)(*F);
+    auto &BFI = GetBFI(*F);
+    auto &TTI = GetTTI(*F);
     return InstCostVisitor(M.getDataLayout(), BFI, TTI, Solver);
   }
 

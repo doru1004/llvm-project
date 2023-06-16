@@ -292,7 +292,8 @@ llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
   if (AS != ExpectedAS) {
     Addr = getTargetCodeGenInfo().performAddrSpaceCast(
         *this, GV, AS, ExpectedAS,
-        LTy->getPointerTo(getContext().getTargetAddressSpace(ExpectedAS)));
+        llvm::PointerType::get(getLLVMContext(),
+                               getContext().getTargetAddressSpace(ExpectedAS)));
   }
 
   setStaticLocalDeclAddress(&D, Addr);
@@ -1405,9 +1406,6 @@ void CodeGenFunction::EmitAndRegisterVariableArrayDimensions(
     else {
       // Create an artificial VarDecl to generate debug info for.
       IdentifierInfo *NameIdent = VLAExprNames[NameIdx++];
-      assert(cast<llvm::PointerType>(VlaSize.NumElts->getType())
-                 ->isOpaqueOrPointeeTypeMatches(SizeTy) &&
-             "Number of VLA elements must be SizeTy");
       auto QT = getContext().getIntTypeForBitwidth(
           SizeTy->getScalarSizeInBits(), false);
       auto *ArtificialDecl = VarDecl::Create(
@@ -2513,7 +2511,7 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
       assert(getContext().getTargetAddressSpace(SrcLangAS) ==
              CGM.getDataLayout().getAllocaAddrSpace());
       auto DestAS = getContext().getTargetAddressSpace(DestLangAS);
-      auto *T = DeclPtr.getElementType()->getPointerTo(DestAS);
+      auto *T = llvm::PointerType::get(getLLVMContext(), DestAS);
       DeclPtr =
           DeclPtr.withPointer(getTargetHooks().performAddrSpaceCast(
                                   *this, V, SrcLangAS, DestLangAS, T, true),
