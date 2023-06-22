@@ -1186,6 +1186,8 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
           auto *ExprArg = EmitLoadOfLValue(EmitLValueForLambdaField(FD),
                                            SourceLocation()).getScalarVal();
           auto VAT = FD->getCapturedVLAType();
+          printf("CGF: ADD ENTRY TO VLA 3:\n");
+          // VAT->dump();
           VLASizeMap[VAT->getSizeExpr()] = ExprArg;
         }
       }
@@ -2177,6 +2179,17 @@ CodeGenFunction::getVLASize(const VariableArrayType *type) {
   QualType elementType;
   do {
     elementType = type->getElementType();
+    printf("getVLASize : \n");
+    type->getSizeExpr()->dump();
+    if (const auto *ICE = dyn_cast<ImplicitCastExpr>(type->getSizeExpr())) {
+      const auto *VD = cast<VarDecl>(cast<DeclRefExpr>(ICE->getSubExpr())->getDecl());
+      VD->dump();
+      printf("Var Name = %s\n", VD->getName().str().c_str());
+      if (VD->getName() == "NN") {
+        CurFn->dump();
+      }
+      // assert(VD->getName() != "NN");
+    }
     llvm::Value *vlaSize = VLASizeMap[type->getSizeExpr()];
     assert(vlaSize && "no size for VLA!");
     assert(vlaSize->getType() == SizeTy);
@@ -2291,6 +2304,7 @@ void CodeGenFunction::EmitVariablyModifiedType(QualType type) {
       if (const Expr *sizeExpr = vat->getSizeExpr()) {
         // It's possible that we might have emitted this already,
         // e.g. with a typedef and a pointer to it.
+        printf("ANOTHER WAY TO SET ENTRY IN VLASIZEMAP 1\n");
         llvm::Value *&entry = VLASizeMap[sizeExpr];
         if (!entry) {
           llvm::Value *size = EmitScalarExpr(sizeExpr);

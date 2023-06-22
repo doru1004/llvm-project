@@ -304,6 +304,7 @@ LValue CodeGenFunction::EmitOMPSharedLValue(const Expr *E) {
 }
 
 llvm::Value *CodeGenFunction::getTypeSize(QualType Ty) {
+  printf("==========================> getTypeSize\n");
   ASTContext &C = getContext();
   llvm::Value *Size = nullptr;
   auto SizeInChars = C.getTypeSizeInChars(Ty);
@@ -316,12 +317,143 @@ llvm::Value *CodeGenFunction::getTypeSize(QualType Ty) {
           Size ? Builder.CreateNUWMul(Size, VlaSize.NumElts) : VlaSize.NumElts;
     }
     SizeInChars = C.getTypeSizeInChars(Ty);
+    printf("==========================> getTypeSize END 1\n");
     if (SizeInChars.isZero())
       return llvm::ConstantInt::get(SizeTy, /*V=*/0);
     return Builder.CreateNUWMul(Size, CGM.getSize(SizeInChars));
   }
+  printf("==========================> getTypeSize END 2\n");
   return CGM.getSize(SizeInChars);
 }
+
+llvm::Value *CodeGenFunction::getOpenMPTargetRegionVLATypeSize(QualType Ty) {
+  printf("==========================> getOpenMPVLATypeSize\n");
+  ASTContext &C = getContext();
+  llvm::Value *Size = nullptr;
+  auto SizeInChars = C.getTypeSizeInChars(Ty);
+  assert(SizeInChars.isZero() && "getTypeSizeInChars() returns 0 for a VLA");
+
+  // Emit the expression used for the VLA size:
+  while (const VariableArrayType *VAT = C.getAsVariableArrayType(Ty)) {
+    VAT->dump();
+    if (const Expr *SizeExpr = VAT->getSizeExpr()) {
+      printf("ANOTHER WAY TO SET ENTRY IN VLASIZEMAP 2\n");
+      SizeExpr->dump();
+      llvm::Value *&Entry = VLASizeMap[SizeExpr];
+      if (!Entry) {
+        llvm::Value *SizeExprValue = EmitScalarExpr(SizeExpr);
+        Entry = Builder.CreateIntCast(SizeExprValue, SizeTy, /*signed*/ false);
+      }
+    }
+    VlaSizePair VlaSize = getVLASize(VAT);
+    Ty = VlaSize.Type;
+    Size =
+        Size ? Builder.CreateNUWMul(Size, VlaSize.NumElts) : VlaSize.NumElts;
+  }
+
+  //   // Unknown size indication requires no size computation.
+  // // Otherwise, evaluate and record it.
+  // if (const Expr *sizeExpr = vat->getSizeExpr()) {
+  //   // It's possible that we might have emitted this already,
+  //   // e.g. with a typedef and a pointer to it.
+  //   printf("ANOTHER WAY TO SET ENTRY IN VLASIZEMAP 1\n");
+  //   llvm::Value *&entry = VLASizeMap[sizeExpr];
+  //   if (!entry) {
+  //     llvm::Value *size = EmitScalarExpr(sizeExpr);
+
+  //     // C11 6.7.6.2p5:
+  //     //   If the size is an expression that is not an integer constant
+  //     //   expression [...] each time it is evaluated it shall have a value
+  //     //   greater than zero.
+  //     if (SanOpts.has(SanitizerKind::VLABound)) {
+  //       SanitizerScope SanScope(this);
+  //       llvm::Value *Zero = llvm::Constant::getNullValue(size->getType());
+  //       clang::QualType SEType = sizeExpr->getType();
+  //       llvm::Value *CheckCondition =
+  //           SEType->isSignedIntegerType()
+  //               ? Builder.CreateICmpSGT(size, Zero)
+  //               : Builder.CreateICmpUGT(size, Zero);
+  //       llvm::Constant *StaticArgs[] = {
+  //           EmitCheckSourceLocation(sizeExpr->getBeginLoc()),
+  //           EmitCheckTypeDescriptor(SEType)};
+  //       EmitCheck(std::make_pair(CheckCondition, SanitizerKind::VLABound),
+  //                 SanitizerHandler::VLABoundNotPositive, StaticArgs, size);
+  //     }
+
+  //     // Always zexting here would be wrong if it weren't
+  //     // undefined behavior to have a negative bound.
+  //     // FIXME: What about when size's type is larger than size_t?
+  //     entry = Builder.CreateIntCast(size, SizeTy, /*signed*/ false);
+  //   }
+  // }
+
+  // while (const VariableArrayType *VAT = C.getAsVariableArrayType(Ty)) {
+  //   llvm::Value *vlaSize = VLASizeMap[VAT->getSizeExpr()];
+  //   // If VLA size is not part of the map, it can only be a constant. If it
+  //   // is not a constant then we fail.
+  //   if (!vlaSize) {
+  //     Ty = VAT->getElementType();
+  //     if (const auto *ICE = dyn_cast<ImplicitCastExpr>(VAT->getSizeExpr())) {
+  //       const auto *VD = cast<VarDecl>(cast<DeclRefExpr>(ICE->getSubExpr())->getDecl());
+  //       VD->dump();
+  //       if (VD->hasDefinition(C)) {
+  //         printf("Declaration has definition!!\n");
+  //         const Expr *Init = VD->getAnyInitializer();
+  //         Init->dump();
+  //       }
+  //       // if (const auto *ValueDef = dyn_cast<IntegerLiteral>(VD->getSubExpr())) {
+  //       //   ValueDef->dump();
+  //       // }
+  //     }
+  //     // Size =
+  //     //     Size ? Builder.CreateNUWMul(Size, VlaSize.NumElts) : VlaSize.NumElts;
+  //     VAT->dump();
+  //     assert(false);
+  //   } else {
+  //     VlaSizePair VlaSize = getVLASize(VAT);
+  //     Ty = VlaSize.Type;
+  //     Size =
+  //         Size ? Builder.CreateNUWMul(Size, VlaSize.NumElts) : VlaSize.NumElts;
+  //   }
+  // }
+  SizeInChars = C.getTypeSizeInChars(Ty);
+  if (SizeInChars.isZero())
+    return llvm::ConstantInt::get(SizeTy, /*V=*/0);
+  return Builder.CreateNUWMul(Size, CGM.getSize(SizeInChars));
+  return CGM.getSize(SizeInChars);
+}
+
+// CodeGenFunction::VlaSizePair
+// CodeGenFunction::getVLASize(const VariableArrayType *type) {
+//   // The number of elements so far; always size_t.
+//   llvm::Value *numElements = nullptr;
+
+//   QualType elementType;
+//   do {
+//     elementType = type->getElementType();
+//     printf("getVLASize : \n");
+//     type->getSizeExpr()->dump();
+//     if (const auto *ICE = dyn_cast<ImplicitCastExpr>(type->getSizeExpr())) {
+//       const auto *VD = cast<VarDecl>(cast<DeclRefExpr>(ICE->getSubExpr())->getDecl());
+//       VD->dump();
+//       printf("Var Name = %s\n", VD->getName().str().c_str());
+//       // assert(VD->getName() != "NN");
+//     }
+//     llvm::Value *vlaSize = VLASizeMap[type->getSizeExpr()];
+//     assert(vlaSize && "no size for VLA!");
+//     assert(vlaSize->getType() == SizeTy);
+
+//     if (!numElements) {
+//       numElements = vlaSize;
+//     } else {
+//       // It's undefined behavior if this wraps around, so mark it that way.
+//       // FIXME: Teach -fsanitize=undefined to trap this.
+//       numElements = Builder.CreateNUWMul(numElements, vlaSize);
+//     }
+//   } while ((type = getContext().getAsVariableArrayType(elementType)));
+
+//   return { numElements, elementType };
+// }
 
 void CodeGenFunction::GenerateOpenMPCapturedVars(
     const CapturedStmt &S, SmallVectorImpl<llvm::Value *> &CapturedVars) {
@@ -636,8 +768,11 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
     }
   }
   (void)LocalScope.Privatize();
-  for (const auto &VLASizePair : VLASizes)
+  for (const auto &VLASizePair : VLASizes) {
+    printf("CGSTMTOPENMP: ADD ENTRY TO VLA 2:\n");
+    VLASizePair.second.first->dump();
     VLASizeMap[VLASizePair.second.first] = VLASizePair.second.second;
+  }
   PGO.assignRegionCounters(GlobalDecl(CD), F);
   CapturedStmtInfo->EmitBody(*this, CD->getBody());
   (void)LocalScope.ForceCleanup();

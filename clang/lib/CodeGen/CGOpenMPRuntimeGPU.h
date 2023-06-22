@@ -125,6 +125,12 @@ public:
   /// by all specializations of OpenMPGPURuntime Targets like AMDGCN
   /// and NVPTX.
 
+  /// Get call to __kmpc_alloc_shared
+  std::pair<llvm::Value *, llvm::Value *> getKmpcAllocShared(CodeGenFunction &CGF, const VarDecl *VD);
+
+  /// Get call to __kmpc_free_shared
+  void getKmpcFreeShared(CodeGenFunction &CGF, std::pair<llvm::Value *, llvm::Value *> AddrSizePair);
+
   /// Get the GPU warp size.
   llvm::Value *getGPUWarpSize(CodeGenFunction &CGF);
 

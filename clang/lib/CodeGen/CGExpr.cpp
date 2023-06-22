@@ -1294,6 +1294,7 @@ LValue CodeGenFunction::EmitCheckedLValue(const Expr *E, TypeCheckKind TCK) {
 ///
 LValue CodeGenFunction::EmitLValue(const Expr *E,
                                    KnownNonNull_t IsKnownNonNull) {
+  printf("   CodeGenFunction::EmitLValue(\n");
   LValue LV = EmitLValueHelper(E, IsKnownNonNull);
   if (IsKnownNonNull && !LV.isKnownNonNull())
     LV.setKnownNonNull();
@@ -1302,6 +1303,7 @@ LValue CodeGenFunction::EmitLValue(const Expr *E,
 
 LValue CodeGenFunction::EmitLValueHelper(const Expr *E,
                                          KnownNonNull_t IsKnownNonNull) {
+  printf("   CodeGenFunction::EmitLValueHelper(\n");
   ApplyDebugLocation DL(*this, E);
   switch (E->getStmtClass()) {
   default: return EmitUnsupportedLValue(E, "l-value expression");
@@ -2757,14 +2759,19 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
   const NamedDecl *ND = E->getDecl();
   QualType T = E->getType();
 
+  printf("   EmitDeclRefLValue(\n");
+
   assert(E->isNonOdrUse() != NOUR_Unevaluated &&
          "should not emit an unevaluated operand");
 
   if (const auto *VD = dyn_cast<VarDecl>(ND)) {
+    printf(" EmitDeclRefLValue 1\n");
     // Global Named registers access via intrinsics only
     if (VD->getStorageClass() == SC_Register &&
         VD->hasAttr<AsmLabelAttr>() && !VD->isLocalVarDecl())
       return EmitGlobalNamedRegister(VD, CGM);
+    
+    printf(" EmitDeclRefLValue 1 1\n");
 
     // If this DeclRefExpr does not constitute an odr-use of the variable,
     // we're not permitted to emit a reference to it in general, and it might
@@ -2773,6 +2780,7 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     if (E->isNonOdrUse() == NOUR_Constant &&
         (VD->getType()->isReferenceType() ||
          !canEmitSpuriousReferenceToVariable(*this, E, VD, true))) {
+      printf(" EmitDeclRefLValue 1 2\n");
       VD->getAnyInitializer(VD);
       llvm::Constant *Val = ConstantEmitter(*this).emitAbstract(
           E->getLocation(), *VD->evaluateValue(), VD->getType());
@@ -2799,17 +2807,24 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
       return MakeAddrLValue(Addr, T, AlignmentSource::Decl);
     }
 
+    printf(" EmitDeclRefLValue 1 3\n");
+
     // FIXME: Handle other kinds of non-odr-use DeclRefExprs.
 
     // Check for captured variables.
     if (E->refersToEnclosingVariableOrCapture()) {
+      printf(" EmitDeclRefLValue 1 4\n");
       VD = VD->getCanonicalDecl();
       if (auto *FD = LambdaCaptureFields.lookup(VD))
         return EmitCapturedFieldLValue(*this, FD, CXXABIThisValue);
+      printf(" EmitDeclRefLValue 1 4 1\n");
       if (CapturedStmtInfo) {
+        printf(" EmitDeclRefLValue 1 4 2\n");
         auto I = LocalDeclMap.find(VD);
         if (I != LocalDeclMap.end()) {
+          printf(" EmitDeclRefLValue 1 4 3\n");
           LValue CapLVal;
+          printf(" EmitDeclRefLValue 1 4 3 => %d\n", VD->getType()->isReferenceType());
           if (VD->getType()->isReferenceType())
             CapLVal = EmitLoadOfReferenceLValue(I->second, VD->getType(),
                                                 AlignmentSource::Decl);
@@ -2822,6 +2837,7 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
             CapLVal.setNontemporal(/*Value=*/true);
           return CapLVal;
         }
+        printf(" EmitDeclRefLValue 1 4 4\n");
         LValue CapLVal =
             EmitCapturedFieldLValue(*this, CapturedStmtInfo->lookup(VD),
                                     CapturedStmtInfo->getContextValue());
@@ -2839,11 +2855,15 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
         return CapLVal;
       }
 
+      printf(" EmitDeclRefLValue 1 5\n");
+
       assert(isa<BlockDecl>(CurCodeDecl));
       Address addr = GetAddrOfBlockDecl(VD);
       return MakeAddrLValue(addr, T, AlignmentSource::Decl);
     }
   }
+
+  printf(" EmitDeclRefLValue 2\n");
 
   // FIXME: We should be able to assert this for FunctionDecls as well!
   // FIXME: We should be able to assert this for all DeclRefExprs, not just
@@ -2851,28 +2871,37 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
   assert((ND->isUsed(false) || !isa<VarDecl>(ND) || E->isNonOdrUse() ||
           !E->getLocation().isValid()) &&
          "Should not use decl without marking it used!");
+  
+  printf(" EmitDeclRefLValue 3\n");
 
   if (ND->hasAttr<WeakRefAttr>()) {
+    printf(" EmitDeclRefLValue 4\n");
     const auto *VD = cast<ValueDecl>(ND);
     ConstantAddress Aliasee = CGM.GetWeakRefReference(VD);
     return MakeAddrLValue(Aliasee, T, AlignmentSource::Decl);
   }
 
   if (const auto *VD = dyn_cast<VarDecl>(ND)) {
+    printf(" EmitDeclRefLValue 5\n");
+    VD->dump();
     // Check if this is a global variable.
     if (VD->hasLinkage() || VD->isStaticDataMember())
       return EmitGlobalVarDeclLValue(*this, E, VD);
+    
+    printf(" EmitDeclRefLValue 5 1\n");
 
     Address addr = Address::invalid();
 
     // The variable should generally be present in the local decl map.
     auto iter = LocalDeclMap.find(VD);
     if (iter != LocalDeclMap.end()) {
+      printf(" EmitDeclRefLValue 5 2\n");
       addr = iter->second;
 
     // Otherwise, it might be static local we haven't emitted yet for
     // some reason; most likely, because it's in an outer function.
     } else if (VD->isStaticLocal()) {
+      printf(" EmitDeclRefLValue 5 3\n");
       llvm::Constant *var = CGM.getOrCreateStaticVarDecl(
           *VD, CGM.getLLVMLinkageVarDefinition(VD, /*IsConstant=*/false));
       addr = Address(
@@ -2883,10 +2912,14 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
       llvm_unreachable("DeclRefExpr for Decl not entered in LocalDeclMap?");
     }
 
+    printf(" EmitDeclRefLValue 5 4\n");
+
     // Handle threadlocal function locals.
     if (VD->getTLSKind() != VarDecl::TLS_None)
       addr = addr.withPointer(
           Builder.CreateThreadLocalAddress(addr.getPointer()), NotKnownNonNull);
+    
+    printf(" EmitDeclRefLValue 5 5\n");
 
     // Check for OpenMP threadprivate variables.
     if (getLangOpts().OpenMP && !getLangOpts().OpenMPSimd &&
@@ -2896,16 +2929,22 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
           E->getExprLoc());
     }
 
+    printf(" EmitDeclRefLValue 5 6\n");
+
     // Drill into block byref variables.
     bool isBlockByref = VD->isEscapingByref();
     if (isBlockByref) {
       addr = emitBlockByrefAddress(addr, VD);
     }
 
+    printf(" EmitDeclRefLValue 5 7\n");
+
     // Drill into reference types.
     LValue LV = VD->getType()->isReferenceType() ?
         EmitLoadOfReferenceLValue(addr, VD->getType(), AlignmentSource::Decl) :
         MakeAddrLValue(addr, T, AlignmentSource::Decl);
+    
+    printf(" EmitDeclRefLValue 5 8\n");
 
     bool isLocalStorage = VD->hasLocalStorage();
 
@@ -2917,6 +2956,8 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
       LV.setNonGC(true);
     }
 
+    printf(" EmitDeclRefLValue 5 9\n");
+
     bool isImpreciseLifetime =
       (isLocalStorage && !VD->hasAttr<ObjCPreciseLifetimeAttr>());
     if (isImpreciseLifetime)
@@ -2925,7 +2966,9 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     return LV;
   }
 
+  printf(" EmitDeclRefLValue 6\n");
   if (const auto *FD = dyn_cast<FunctionDecl>(ND)) {
+    printf(" EmitDeclRefLValue 7\n");
     LValue LV = EmitFunctionDeclLValue(*this, E, FD);
 
     // Emit debuginfo for the function declaration if the target wants to.
@@ -2941,10 +2984,13 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     return LV;
   }
 
+  printf(" EmitDeclRefLValue 8\n");
+
   // FIXME: While we're emitting a binding from an enclosing scope, all other
   // DeclRefExprs we see should be implicitly treated as if they also refer to
   // an enclosing scope.
   if (const auto *BD = dyn_cast<BindingDecl>(ND)) {
+    printf(" EmitDeclRefLValue 9\n");
     if (E->refersToEnclosingVariableOrCapture()) {
       auto *FD = LambdaCaptureFields.lookup(BD);
       return EmitCapturedFieldLValue(*this, FD, CXXABIThisValue);
@@ -2952,15 +2998,20 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
     return EmitLValue(BD->getBinding());
   }
 
+  printf(" EmitDeclRefLValue 10\n");
   // We can form DeclRefExprs naming GUID declarations when reconstituting
   // non-type template parameters into expressions.
   if (const auto *GD = dyn_cast<MSGuidDecl>(ND))
     return MakeAddrLValue(CGM.GetAddrOfMSGuidDecl(GD), T,
                           AlignmentSource::Decl);
+  
+  printf(" EmitDeclRefLValue 11\n");
 
   if (const auto *TPO = dyn_cast<TemplateParamObjectDecl>(ND))
     return MakeAddrLValue(CGM.GetAddrOfTemplateParamObject(TPO), T,
                           AlignmentSource::Decl);
+  
+  printf(" EmitDeclRefLValue 12\n");
 
   llvm_unreachable("Unhandled DeclRefExpr");
 }
@@ -3635,15 +3686,28 @@ Address CodeGenFunction::EmitArrayToPointerDecay(const Expr *E,
                                                  TBAAAccessInfo *TBAAInfo) {
   assert(E->getType()->isArrayType() &&
          "Array to pointer decay must have array source type!");
+  
+  printf("=========================================================\n");
+  E->dump();
+  CurFn->dump();
+
+  printf(" 0 ===>\n");
 
   // Expressions of array type can't be bitfields or vector elements.
   LValue LV = EmitLValue(E);
+
+  printf(" 1 ===>\n");
+
   Address Addr = LV.getAddress(*this);
+
+  printf(" 2 ===>\n");
 
   // If the array type was an incomplete type, we need to make sure
   // the decay ends up being the right type.
   llvm::Type *NewTy = ConvertType(E->getType());
   Addr = Builder.CreateElementBitCast(Addr, NewTy);
+
+  printf(" 3 ===> %d\n", !E->getType()->isVariableArrayType());
 
   // Note that VLA pointers are always decayed, so we don't need to do
   // anything here.
@@ -3653,14 +3717,19 @@ Address CodeGenFunction::EmitArrayToPointerDecay(const Expr *E,
     Addr = Builder.CreateConstArrayGEP(Addr, 0, "arraydecay");
   }
 
+  printf(" 4 ===> \n");
+
   // The result of this decay conversion points to an array element within the
   // base lvalue. However, since TBAA currently does not support representing
   // accesses to elements of member arrays, we conservatively represent accesses
   // to the pointee object as if it had no any base lvalue specified.
   // TODO: Support TBAA for member arrays.
   QualType EltType = E->getType()->castAsArrayTypeUnsafe()->getElementType();
+  printf(" 5 ===> \n");
   if (BaseInfo) *BaseInfo = LV.getBaseInfo();
+  printf(" 6 ===> \n");
   if (TBAAInfo) *TBAAInfo = CGM.getTBAAAccessInfo(EltType);
+  printf(" 7 ===> \n");
 
   return Builder.CreateElementBitCast(Addr, ConvertTypeForMem(EltType));
 }
@@ -3670,14 +3739,20 @@ Address CodeGenFunction::EmitArrayToPointerDecay(const Expr *E,
 static const Expr *isSimpleArrayDecayOperand(const Expr *E) {
   // If this isn't just an array->pointer decay, bail out.
   const auto *CE = dyn_cast<CastExpr>(E);
-  if (!CE || CE->getCastKind() != CK_ArrayToPointerDecay)
+  if (!CE || CE->getCastKind() != CK_ArrayToPointerDecay) {
+    printf("   isSimpleArrayDecayOperand --- False 1\n");
     return nullptr;
+  }
 
   // If this is a decay from variable width array, bail out.
   const Expr *SubExpr = CE->getSubExpr();
-  if (SubExpr->getType()->isVariableArrayType())
+  SubExpr->dump();
+  if (SubExpr->getType()->isVariableArrayType()) {
+    printf("   isSimpleArrayDecayOperand --- False 2\n");
     return nullptr;
+  }
 
+  printf("   isSimpleArrayDecayOperand --- TRUE\n");
   return SubExpr;
 }
 
@@ -3811,6 +3886,8 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
   // in lexical order (this complexity is, sadly, required by C++17).
   llvm::Value *IdxPre =
       (E->getLHS() == E->getIdx()) ? EmitScalarExpr(E->getIdx()) : nullptr;
+  printf("===> EmitArraySubscriptExpr 1\n");
+  E->dump();
   bool SignedIndices = false;
   auto EmitIdxAfterBase = [&, IdxPre](bool Promote) -> llvm::Value * {
     auto *Idx = IdxPre;
@@ -3833,11 +3910,13 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
     return Idx;
   };
   IdxPre = nullptr;
+  printf("===> EmitArraySubscriptExpr 2\n");
 
   // If the base is a vector type, then we are forming a vector element lvalue
   // with this subscript.
   if (E->getBase()->getType()->isVectorType() &&
       !isa<ExtVectorElementExpr>(E->getBase())) {
+    printf("===> EmitArraySubscriptExpr 3\n");
     // Emit the vector as an lvalue to get its address.
     LValue LHS = EmitLValue(E->getBase());
     auto *Idx = EmitIdxAfterBase(/*Promote*/false);
@@ -3851,6 +3930,7 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
 
   // Handle the extvector case we ignored above.
   if (isa<ExtVectorElementExpr>(E->getBase())) {
+    printf("===> EmitArraySubscriptExpr 4\n");
     LValue LV = EmitLValue(E->getBase());
     auto *Idx = EmitIdxAfterBase(/*Promote*/true);
     Address Addr = EmitExtVectorElementLValue(LV);
@@ -3862,11 +3942,14 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
                           CGM.getTBAAInfoForSubobject(LV, EltType));
   }
 
+  printf("===> EmitArraySubscriptExpr 5\n");
+
   LValueBaseInfo EltBaseInfo;
   TBAAAccessInfo EltTBAAInfo;
   Address Addr = Address::invalid();
   if (const VariableArrayType *vla =
            getContext().getAsVariableArrayType(E->getType())) {
+    printf("===> EmitArraySubscriptExpr 6\n");
     // The base must be a pointer, which is not an aggregate.  Emit
     // it.  It needs to be emitted first in case it's what captures
     // the VLA bounds.
@@ -3891,6 +3974,7 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
                                  SignedIndices, E->getExprLoc());
 
   } else if (const ObjCObjectType *OIT = E->getType()->getAs<ObjCObjectType>()){
+    printf("===> EmitArraySubscriptExpr 7\n");
     // Indexing over an interface, as in "NSString *P; P[4];"
 
     // Emit the base pointer.
@@ -3921,6 +4005,7 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
     // Cast back.
     Addr = Builder.CreateElementBitCast(Addr, OrigBaseElemTy);
   } else if (const Expr *Array = isSimpleArrayDecayOperand(E->getBase())) {
+    printf("===> EmitArraySubscriptExpr 8\n");
     // If this is A[i] where A is an array, the frontend will have decayed the
     // base to be a ArrayToPointerDecay implicit cast.  While correct, it is
     // inefficient at -O0 to emit a "gep A, 0, 0" when codegen'ing it, then a
@@ -3945,6 +4030,7 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
     EltBaseInfo = ArrayLV.getBaseInfo();
     EltTBAAInfo = CGM.getTBAAInfoForSubobject(ArrayLV, E->getType());
   } else {
+    printf("===> EmitArraySubscriptExpr 9\n");
     // The base must be a pointer; emit it with an estimate of its alignment.
     Addr = EmitPointerWithAlignment(E->getBase(), &EltBaseInfo, &EltTBAAInfo);
     auto *Idx = EmitIdxAfterBase(/*Promote*/true);
@@ -3954,6 +4040,8 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
                                  SignedIndices, E->getExprLoc(), &ptrType,
                                  E->getBase());
   }
+
+  printf("===> EmitArraySubscriptExpr 10\n");
 
   LValue LV = MakeAddrLValue(Addr, E->getType(), EltBaseInfo, EltTBAAInfo);
 

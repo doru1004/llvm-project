@@ -2964,6 +2964,8 @@ CodeGenFunction::GenerateCapturedStmtFunction(const CapturedStmt &S) {
           EmitLoadOfLValue(EmitLValueForField(Base, FD), S.getBeginLoc())
               .getScalarVal();
       auto VAT = FD->getCapturedVLAType();
+      printf("CGSTMT: ADD ENTRY TO VLA 1:\n");
+      // VAT->dump();
       VLASizeMap[VAT->getSizeExpr()] = ExprArg;
     }
   }

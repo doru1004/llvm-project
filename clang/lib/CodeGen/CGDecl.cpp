@@ -16,6 +16,7 @@
 #include "CGDebugInfo.h"
 #include "CGOpenCLRuntime.h"
 #include "CGOpenMPRuntime.h"
+#include "CGOpenMPRuntimeGPU.h"
 #include "CodeGenFunction.h"
 #include "CodeGenModule.h"
 #include "ConstantEmitter.h"
@@ -578,6 +579,18 @@ namespace {
       llvm::Value *V = CGF.Builder.CreateLoad(Stack);
       llvm::Function *F = CGF.CGM.getIntrinsic(llvm::Intrinsic::stackrestore);
       CGF.Builder.CreateCall(F, V);
+    }
+  };
+
+  struct KmpcAllocFree final : EHScopeStack::Cleanup {
+    std::pair<llvm::Value *, llvm::Value *> AddrSizePair;
+    KmpcAllocFree(std::pair<llvm::Value *, llvm::Value *> AddrSizePair) : AddrSizePair(AddrSizePair) {}
+    void Emit(CodeGenFunction &CGF, Flags flags) override {
+      // DORU
+      CGOpenMPRuntimeGPU &RT =
+          *(static_cast<CGOpenMPRuntimeGPU *>(&CGF.CGM.getOpenMPRuntime()));
+      RT.getKmpcFreeShared(CGF, AddrSizePair);
+      CGF.CurFn->dump();
     }
   };
 
@@ -1583,28 +1596,63 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
   } else {
     EnsureInsertPoint();
 
-    if (!DidCallStackSave) {
-      // Save the stack.
-      Address Stack =
-        CreateTempAlloca(Int8PtrTy, getPointerAlign(), "saved_stack");
-
-      llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stacksave);
-      llvm::Value *V = Builder.CreateCall(F);
-      Builder.CreateStore(V, Stack);
-
-      DidCallStackSave = true;
-
-      // Push a cleanup block and restore the stack there.
-      // FIXME: in general circumstances, this should be an EH cleanup.
-      pushStackRestore(NormalCleanup, Stack);
+    if (CGM.getLangOpts().OpenMPIRBuilder) {
+      printf("\n\nCGM.getLangOpts().OpenMPIRBuilder is TRUE\n\n");
+    } else {
+      printf("\n\nCGM.getLangOpts().OpenMPIRBuilder is FALSE\n\n");
     }
 
-    auto VlaSize = getVLASize(Ty);
-    llvm::Type *llvmTy = ConvertTypeForMem(VlaSize.Type);
+    printf(" ===> getLangOpts().OpenMP = %d\n", getLangOpts().OpenMP);
 
-    // Allocate memory for the array.
-    address = CreateTempAlloca(llvmTy, alignment, "vla", VlaSize.NumElts,
-                               &AllocaAddr);
+    // Delayed globalization for variable length arrays with dynamic sizes
+    // for OpenMP device offloading to AMD GPUs.
+    //
+    // int N = 10;
+    // int A[N];
+    //
+    printf(" ===> getTarget().getTriple().isAMDGCN() = %d\n", getTarget().getTriple().isAMDGCN());
+    if (getLangOpts().OpenMP && getTarget().getTriple().isAMDGCN()) {
+      D.dump();
+
+      CGOpenMPRuntimeGPU &RT =
+          *(static_cast<CGOpenMPRuntimeGPU *>(&CGM.getOpenMPRuntime()));
+
+      std::pair<llvm::Value *, llvm::Value *> AddrSizePair = RT.getKmpcAllocShared(*this, &D);
+
+      // DORU
+      LValue Base = MakeAddrLValue(AddrSizePair.first, D.getType(),
+                                   CGM.getContext().getDeclAlign(&D),
+                                   AlignmentSource::Decl);
+      address = Base.getAddress(*this);
+
+      CurFn->dump();
+
+      // Push a cleanup block to emit the call to kmpc free:
+      pushKmpcAllocFree(NormalCleanup, AddrSizePair);
+    } else {
+      if (!DidCallStackSave) {
+        // Save the stack.
+        Address Stack =
+          CreateTempAlloca(Int8PtrTy, getPointerAlign(), "saved_stack");
+
+        llvm::Function *F = CGM.getIntrinsic(llvm::Intrinsic::stacksave);
+        llvm::Value *V = Builder.CreateCall(F);
+        Builder.CreateStore(V, Stack);
+
+        DidCallStackSave = true;
+
+        // Push a cleanup block and restore the stack there.
+        // FIXME: in general circumstances, this should be an EH cleanup.
+        pushStackRestore(NormalCleanup, Stack);
+      }
+
+      auto VlaSize = getVLASize(Ty);
+      llvm::Type *llvmTy = ConvertTypeForMem(VlaSize.Type);
+
+      // Allocate memory for the array.
+      address = CreateTempAlloca(llvmTy, alignment, "vla", VlaSize.NumElts,
+                                &AllocaAddr);
+    }
 
     // If we have debug info enabled, properly describe the VLA dimensions for
     // this type by registering the vla size expression for each of the
@@ -2139,6 +2187,10 @@ void CodeGenFunction::pushDestroy(CleanupKind cleanupKind, Address addr,
 
 void CodeGenFunction::pushStackRestore(CleanupKind Kind, Address SPMem) {
   EHStack.pushCleanup<CallStackRestore>(Kind, SPMem);
+}
+
+void CodeGenFunction::pushKmpcAllocFree(CleanupKind Kind, std::pair<llvm::Value *, llvm::Value *> AddrSizePair) {
+  EHStack.pushCleanup<KmpcAllocFree>(Kind, AddrSizePair);
 }
 
 void CodeGenFunction::pushLifetimeExtendedDestroy(CleanupKind cleanupKind,
