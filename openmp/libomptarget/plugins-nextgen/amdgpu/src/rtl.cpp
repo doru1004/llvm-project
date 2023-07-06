@@ -70,6 +70,22 @@ struct AMDGPUDeviceImageTy;
 struct AMDGPUMemoryManagerTy;
 struct AMDGPUMemoryPoolTy;
 
+#include <cstdlib>
+#include <sys/time.h>
+#include <sys/resource.h>
+double mytimer(void) {
+  struct timeval tp;
+  static long start=0, startu;
+  if (!start) {
+    gettimeofday(&tp, NULL);
+    start = tp.tv_sec;
+    startu = tp.tv_usec;
+    return 0.0;
+  }
+  gettimeofday(&tp, NULL);
+  return (((double) (tp.tv_sec - start)) * 1000000.0) + (tp.tv_usec-startu) ;
+}
+
 namespace utils {
 
 /// Iterate elements using an HSA iterate function. Do not use this function
@@ -601,8 +617,10 @@ struct AMDGPUQueueTy {
     std::lock_guard<std::mutex> Lock(Mutex);
 
     // Avoid defining the input dependency if already satisfied.
+    double t1 = mytimer();
     if (InputSignal && !InputSignal->load())
       InputSignal = nullptr;
+    printf("pushKernelLaunch: Timing of load = %f us\n", mytimer() - t1);
 
     // Add a barrier packet before the kernel packet in case there is a pending
     // preceding operation. The barrier packet will delay the processing of
@@ -615,7 +633,9 @@ struct AMDGPUQueueTy {
 
     // Now prepare the kernel packet.
     uint64_t PacketId;
+    t1 = mytimer();
     hsa_kernel_dispatch_packet_t *Packet = acquirePacket(PacketId);
+    printf("pushKernelLaunch: Timing of acquirePacket = %f us\n", mytimer() - t1);
     assert(Packet && "Invalid packet");
 
     // The header of the packet is written in the last moment.
@@ -661,8 +681,10 @@ private:
     // Add a queue barrier waiting on both the other stream's operation and the
     // last operation on the current stream (if any).
     uint64_t PacketId;
+    double t1 = mytimer();
     hsa_barrier_and_packet_t *Packet =
         (hsa_barrier_and_packet_t *)acquirePacket(PacketId);
+    printf("pushBarrierImpl: Timing of acquirePacket = %f us\n", mytimer() - t1);
     assert(Packet && "Invalid packet");
 
     Packet->reserved0 = 0;
@@ -1091,8 +1113,10 @@ public:
     auto [Curr, InputSignal] = consume(OutputSignal);
 
     // Avoid defining the input dependency if already satisfied.
+    double t1 = mytimer();
     if (InputSignal && !InputSignal->load())
       InputSignal = nullptr;
+    printf("pushPinnedMemoryCopyAsync: Timing of load = %f us\n", mytimer() - t1);
 
     // Issue the async memory copy.
     hsa_status_t Status;
@@ -1131,8 +1155,10 @@ public:
     auto [Curr, InputSignal] = consume(OutputSignal1);
 
     // Avoid defining the input dependency if already satisfied.
+    double t1 = mytimer();
     if (InputSignal && !InputSignal->load())
       InputSignal = nullptr;
+    printf("pushMemoryCopyD2HAsync: Timing of load = %f us\n", mytimer() - t1);
 
     // Setup the post action for releasing the intermediate buffer.
     if (auto Err = Slots[Curr].schedReleaseBuffer(Inter, MemoryManager))
@@ -1199,8 +1225,10 @@ public:
     auto [Curr, InputSignal] = consume(OutputSignal);
 
     // Avoid defining the input dependency if already satisfied.
+    double t1 = mytimer();
     if (InputSignal && !InputSignal->load())
       InputSignal = nullptr;
+    printf("pushMemoryCopyH2DAsync: Timing of load = %f us\n", mytimer() - t1);
 
     // Issue the first step: host to host transfer.
     if (InputSignal) {
@@ -1242,6 +1270,7 @@ public:
     // Issue the second step: host to device transfer. Avoid defining the input
     // dependency if already satisfied.
     hsa_status_t Status;
+    t1 = mytimer();
     if (InputSignal && InputSignal->load()) {
       hsa_signal_t InputSignalRaw = InputSignal->get();
       Status = hsa_amd_memory_async_copy(Dst, Agent, Inter, Agent, CopySize, 1,
@@ -1249,6 +1278,7 @@ public:
     } else
       Status = hsa_amd_memory_async_copy(Dst, Agent, Inter, Agent, CopySize, 0,
                                          nullptr, OutputSignal->get());
+    printf("pushMemoryCopyH2DAsync: Timing of load + hsa_amd_memory_async_copy = %f us\n", mytimer() - t1);
 
     return Plugin::check(Status, "Error in hsa_amd_memory_async_copy: %s");
   }
@@ -1257,18 +1287,28 @@ public:
   /// are finalized and it performs the pending post actions (i.e., releasing
   /// intermediate buffers).
   Error synchronize() {
+    double t1 = mytimer();
     std::lock_guard<std::mutex> Lock(Mutex);
+    printf("Timing of synchronize: lock mutex = %f us\n", mytimer() - t1);
 
     // No need to synchronize anything.
-    if (size() == 0)
+    if (size() == 0) {
+      printf(" synchronize: No synchronization!\n");
       return Plugin::success();
+    }
 
+    t1 = mytimer();
     // Wait until all previous operations on the stream have completed.
     if (auto Err = Slots[last()].Signal->wait(StreamBusyWaitMicroseconds))
       return Err;
+    printf("Timing of synchronize: wait for all operations = %f us\n", mytimer() - t1);
 
     // Reset the stream and perform all pending post actions.
-    return complete();
+    t1 = mytimer();
+    auto Err = complete();
+    printf("Timing of synchronize: complete = %f us\n", mytimer() - t1);
+    printf("\n");
+    return Err;
   }
 
   /// Query the stream and complete pending post actions if operations finished.
@@ -1282,8 +1322,10 @@ public:
       return true;
 
     // The last operation did not complete yet. Return directly.
+    double t1 = mytimer();
     if (Slots[last()].Signal->load())
       return false;
+    printf("query: Timing of load = %f us\n", mytimer() - t1);
 
     // Reset the stream and perform all pending post actions.
     if (auto Err = complete())
@@ -1324,19 +1366,28 @@ struct AMDGPUEventTy {
   Error wait(AMDGPUStreamTy &Stream) {
     std::lock_guard<std::mutex> Lock(Mutex);
 
-    if (!RecordedStream)
+    if (!RecordedStream) {
+      printf(" wait: early exit: no recorded stream\n");
       return Plugin::error("Event does not have any recorded stream");
+    }
 
     // Synchronizing the same stream. Do nothing.
-    if (RecordedStream == &Stream)
+    if (RecordedStream == &Stream) {
+      printf(" wait: early exit: synchronizing the same stream. do nothing\n");
       return Plugin::success();
+    }
 
     // No need to wait anything, the recorded stream already finished the
     // corresponding operation.
-    if (RecordedSlot < 0)
+    if (RecordedSlot < 0) {
+      printf(" wait: early exit: stream already finished\n");
       return Plugin::success();
+    }
 
-    return Stream.waitEvent(*this);
+    double t1 = mytimer();
+    auto Err = Stream.waitEvent(*this);
+    printf(" wait: timing of waitEvent = %f us\n", mytimer() - t1);
+    return Err;
   }
 
 protected:
@@ -1382,16 +1433,23 @@ Error AMDGPUStreamTy::waitEvent(const AMDGPUEventTy &Event) {
 
   // The recorded stream already completed the operation because the synchronize
   // identifier is already outdated.
-  if (RecordedStream.SyncCycle != (uint32_t)Event.RecordedSyncCycle)
+  if (RecordedStream.SyncCycle != (uint32_t)Event.RecordedSyncCycle) {
+    printf(" waitEvent: early exit: recorded stream already completed 1\n");
     return Plugin::success();
+  }
 
   // Again, the recorded stream already completed the operation, the last
   // operation's output signal is satisfied.
-  if (!RecordedStream.Slots[Event.RecordedSlot].Signal->load())
+  if (!RecordedStream.Slots[Event.RecordedSlot].Signal->load()) {
+    printf(" waitEvent: early exit: recorded stream already completed 2\n");
     return Plugin::success();
+  }
 
   // Otherwise, make the current stream wait on the other stream's operation.
-  return waitOnStreamOperation(RecordedStream, Event.RecordedSlot);
+  double t1 = mytimer();
+  auto Err = waitOnStreamOperation(RecordedStream, Event.RecordedSlot);
+  printf(" waitEvent: timing of waitOnStreamOperation = %f us\n", mytimer() - t1);
+  return Err;
 }
 
 /// Abstract class that holds the common members of the actual kernel devices
@@ -1846,6 +1904,7 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
 
   /// Synchronize current thread with the pending operations on the async info.
   Error synchronizeImpl(__tgt_async_info &AsyncInfo) override {
+    printf("synchronizeImpl: call\n");
     AMDGPUStreamTy *Stream =
         reinterpret_cast<AMDGPUStreamTy *>(AsyncInfo.Queue);
     assert(Stream && "Invalid stream");
@@ -1939,9 +1998,11 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
   /// Submit data to the device (host to device transfer).
   Error dataSubmitImpl(void *TgtPtr, const void *HstPtr, int64_t Size,
                        AsyncInfoWrapperTy &AsyncInfoWrapper) override {
+    printf("dataSubmitImpl: call\n");
     // Use one-step asynchronous operation when host memory is already pinned.
     if (void *PinnedPtr =
             PinnedAllocs.getDeviceAccessiblePtrFromPinnedBuffer(HstPtr)) {
+      printf("dataSubmitImpl: use one-step asynchronous operation\n");
       AMDGPUStreamTy &Stream = getStream(AsyncInfoWrapper);
       return Stream.pushPinnedMemoryCopyAsync(TgtPtr, PinnedPtr, Size);
     }
@@ -1950,6 +2011,7 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
 
     // For large transfers use synchronous behavior.
     if (Size >= OMPX_MaxAsyncCopyBytes) {
+      printf("dataSubmitImpl: for large transfers use synchronous behavior\n");
       if (AsyncInfoWrapper.hasQueue())
         if (auto Err = synchronize(AsyncInfoWrapper))
           return Err;
@@ -1971,8 +2033,10 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
               Plugin::check(Status, "Error in hsa_amd_memory_async_copy: %s"))
         return Err;
 
+      double t1 = mytimer();
       if (auto Err = Signal.wait(getStreamBusyWaitMicroseconds()))
         return Err;
+      printf("Timing of dataSubmitImpl: signal wait = %f us\n", mytimer() - t1);
 
       if (auto Err = Signal.deinit())
         return Err;
@@ -1982,6 +2046,7 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
     }
 
     // Otherwise, use two-step copy with an intermediate pinned host buffer.
+    printf("dataSubmitImpl: use two-step copy with an intermediate pinned host buffer\n");
     AMDGPUMemoryManagerTy &PinnedMemoryManager =
         HostDevice.getPinnedMemoryManager();
     if (auto Err = PinnedMemoryManager.allocate(Size, &PinnedHstPtr))
@@ -1995,10 +2060,12 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
   /// Retrieve data from the device (device to host transfer).
   Error dataRetrieveImpl(void *HstPtr, const void *TgtPtr, int64_t Size,
                          AsyncInfoWrapperTy &AsyncInfoWrapper) override {
+    printf("dataRetrieveImpl: call\n");
 
     // Use one-step asynchronous operation when host memory is already pinned.
     if (void *PinnedPtr =
             PinnedAllocs.getDeviceAccessiblePtrFromPinnedBuffer(HstPtr)) {
+      printf("dataRetrieveImpl: use one-step asynchronous operation\n");
       AMDGPUStreamTy &Stream = getStream(AsyncInfoWrapper);
       return Stream.pushPinnedMemoryCopyAsync(PinnedPtr, TgtPtr, Size);
     }
@@ -2007,6 +2074,7 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
 
     // For large transfers use synchronous behavior.
     if (Size >= OMPX_MaxAsyncCopyBytes) {
+      printf("dataRetrieveImpl: use synchronous behavior\n");
       if (AsyncInfoWrapper.hasQueue())
         if (auto Err = synchronize(AsyncInfoWrapper))
           return Err;
@@ -2028,8 +2096,10 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
               Plugin::check(Status, "Error in hsa_amd_memory_async_copy: %s"))
         return Err;
 
+      double t1 = mytimer();
       if (auto Err = Signal.wait(getStreamBusyWaitMicroseconds()))
         return Err;
+      printf("Timing of dataRetrieveImpl: signal wait = %f us\n", mytimer() - t1);
 
       if (auto Err = Signal.deinit())
         return Err;
@@ -2039,6 +2109,7 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
     }
 
     // Otherwise, use two-step copy with an intermediate pinned host buffer.
+    printf("dataRetrieveImpl: use two-step copy with an intermediate pinned host buffer\n");
     AMDGPUMemoryManagerTy &PinnedMemoryManager =
         HostDevice.getPinnedMemoryManager();
     if (auto Err = PinnedMemoryManager.allocate(Size, &PinnedHstPtr))
@@ -2103,11 +2174,15 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
   /// Make the stream wait on the event.
   Error waitEventImpl(void *EventPtr,
                       AsyncInfoWrapperTy &AsyncInfoWrapper) override {
+    printf("waitEventImpl: call");
     AMDGPUEventTy *Event = reinterpret_cast<AMDGPUEventTy *>(EventPtr);
 
     AMDGPUStreamTy &Stream = getStream(AsyncInfoWrapper);
 
-    return Event->wait(Stream);
+    double t1 = mytimer();
+    auto Err = Event->wait(Stream);
+    printf("Timing of waitEventImpl: event wait = %f us\n", mytimer() - t1);
+    return Err;
   }
 
   /// Synchronize the current thread with the event.
@@ -2794,6 +2869,7 @@ Error AMDGPUKernelTy::launchImpl(GenericDeviceTy &GenericDevice,
                                  uint32_t NumThreads, uint64_t NumBlocks,
                                  KernelArgsTy &KernelArgs, void *Args,
                                  AsyncInfoWrapperTy &AsyncInfoWrapper) const {
+  printf("launchImpl: call\n");
   const uint32_t KernelArgsSize = KernelArgs.NumArgs * sizeof(void *);
 
   if (ArgsSize < KernelArgsSize)

@@ -257,6 +257,9 @@ class CheckVarsEscapingDeclContext final
     if (VD->getType()->isVariablyModifiedType()) {
       // If not captured at the target region level then mark the escaped
       // variable as delayed.
+      //Doru
+      VD->dump();
+      printf("IsCaptured = %d\n", IsCaptured);
       if (IsCaptured)
         EscapedVariableLengthDecls.insert(VD);
       else
@@ -1059,7 +1062,10 @@ void CGOpenMPRuntimeGPU::emitGenericVarsProlog(CodeGenFunction &CGF,
     return;
 
   for (auto &Rec : I->getSecond().LocalVarData) {
+    // Doru
+    printf("Emit ALLOC SHARED FOR CONST VAR:\n");
     const auto *VD = cast<VarDecl>(Rec.first);
+    VD->dump();
     bool EscapedParam = I->getSecond().EscapedParameters.count(Rec.first);
     QualType VarTy = VD->getType();
 
@@ -1100,7 +1106,10 @@ void CGOpenMPRuntimeGPU::emitGenericVarsProlog(CodeGenFunction &CGF,
   }
 
   for (const auto *ValueD : I->getSecond().EscapedVariableLengthDecls) {
+    // Doru
+    printf("Emit ALLOC SHARED FOR DYNAMIC VAR:\n");
     const auto *VD = cast<VarDecl>(ValueD);
+    VD->dump();
     std::pair<llvm::Value *, llvm::Value *> AddrSizePair =
         getKmpcAllocShared(CGF, VD);
     I->getSecond().EscapedVariableLengthDeclsAddrs.emplace_back(AddrSizePair);
