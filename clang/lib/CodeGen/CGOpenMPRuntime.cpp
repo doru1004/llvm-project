@@ -1670,6 +1670,9 @@ Address CGOpenMPRuntime::getAddrOfDeclareTargetVar(const VarDecl *VD) {
     return CGM.getLLVMLinkageVarDefinition(VD, /*IsConstant=*/false);
   };
 
+  printf("===> getAddrOfDeclareTargetVar\n");
+  VD->dump();
+
   std::vector<llvm::GlobalVariable *> GeneratedRefs;
 
   llvm::Type *LlvmPtrTy = CGM.getTypes().ConvertTypeForMem(
@@ -1684,8 +1687,12 @@ Address CGOpenMPRuntime::getAddrOfDeclareTargetVar(const VarDecl *VD) {
       CGM.getLangOpts().OMPTargetTriples, LlvmPtrTy, AddrOfGlobal,
       LinkageForVariable);
 
-  if (!addr)
+  if (!addr) {
+    printf("Return an invald Address for the device!\n");
     return Address::invalid();
+  }
+  addr->dump();
+  printf("Return the address of the declare target var\n");
   return Address(addr, LlvmPtrTy, CGM.getContext().getDeclAlign(VD));
 }
 
@@ -1869,6 +1876,10 @@ bool CGOpenMPRuntime::emitDeclareTargetVarDefinition(const VarDecl *VD,
     return false;
   std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
       OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
+  printf("===> emitDeclareTargetVarDefinition COND = %d\n", !Res || *Res == OMPDeclareTargetDeclAttr::MT_Link ||
+      ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
+        *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&
+       HasRequiresUnifiedSharedMemory));
   if (!Res || *Res == OMPDeclareTargetDeclAttr::MT_Link ||
       ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
         *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&
@@ -7335,6 +7346,10 @@ private:
               dyn_cast_or_null<VarDecl>(I->getAssociatedDeclaration())) {
         if (std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
                 OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD)) {
+          printf("===> generateInfoForComponentList COND = %d\n", !Res || *Res == OMPDeclareTargetDeclAttr::MT_Link ||
+      ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
+        *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&
+        CGF.CGM.getOpenMPRuntime().hasRequiresUnifiedSharedMemory()));
           if ((*Res == OMPDeclareTargetDeclAttr::MT_Link) ||
               ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
                 *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&
@@ -10113,6 +10128,10 @@ bool CGOpenMPRuntime::emitTargetGlobalVariable(GlobalDecl GD) {
   std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
       OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(
           cast<VarDecl>(GD.getDecl()));
+  printf("===> emitTargetGlobalVariable COND = %d\n", !Res || *Res == OMPDeclareTargetDeclAttr::MT_Link ||
+      ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
+        *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&
+       HasRequiresUnifiedSharedMemory));
   if (!Res || *Res == OMPDeclareTargetDeclAttr::MT_Link ||
       ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
         *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&
@@ -10179,6 +10198,9 @@ void CGOpenMPRuntime::emitDeferredTargetDecls() const {
         OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
     if (!Res)
       continue;
+    printf("===> emitDeferredTargetDecls COND = %d\n", ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
+        *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&
+       HasRequiresUnifiedSharedMemory));
     if ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
          *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&
         !HasRequiresUnifiedSharedMemory) {
