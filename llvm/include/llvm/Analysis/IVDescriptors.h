@@ -41,7 +41,7 @@ enum class RecurKind {
   Xor,        ///< Bitwise or logical XOR of integers.
   SMin,       ///< Signed integer min implemented in terms of select(cmp()).
   SMax,       ///< Signed integer max implemented in terms of select(cmp()).
-  UMin,       ///< Unisgned integer min implemented in terms of select(cmp()).
+  UMin,       ///< Unsigned integer min implemented in terms of select(cmp()).
   UMax,       ///< Unsigned integer max implemented in terms of select(cmp()).
   FAdd,       ///< Sum of floats.
   FMul,       ///< Product of floats.
@@ -49,7 +49,7 @@ enum class RecurKind {
   FMax,       ///< FP max implemented in terms of select(cmp()).
   FMinimum,   ///< FP min with llvm.minimum semantics
   FMaximum,   ///< FP max with llvm.maximum semantics
-  FMulAdd,    ///< Fused multiply-add of floats (a * b + c).
+  FMulAdd,    ///< Sum of float products with llvm.fmuladd(a * b + sum).
   SelectICmp, ///< Integer select(icmp(),x,y) where one of (x,y) is loop
               ///< invariant
   SelectFCmp  ///< Integer select(fcmp(),x,y) where one of (x,y) is loop
@@ -309,7 +309,7 @@ public:
   enum InductionKind {
     IK_NoInduction,  ///< Not an induction variable.
     IK_IntInduction, ///< Integer induction variable. Step = C.
-    IK_PtrInduction, ///< Pointer induction var. Step = C / sizeof(elem).
+    IK_PtrInduction, ///< Pointer induction var. Step = C.
     IK_FpInduction   ///< Floating point induction variable.
   };
 
@@ -369,11 +369,6 @@ public:
                           : Instruction::BinaryOpsEnd;
   }
 
-  Type *getElementType() const {
-    assert(IK == IK_PtrInduction && "Only pointer induction has element type");
-    return ElementType;
-  }
-
   /// Returns a reference to the type cast instructions in the induction
   /// update chain, that are redundant when guarded with a runtime
   /// SCEV overflow check.
@@ -385,7 +380,6 @@ private:
   /// Private constructor - used by \c isInductionPHI.
   InductionDescriptor(Value *Start, InductionKind K, const SCEV *Step,
                       BinaryOperator *InductionBinOp = nullptr,
-                      Type *ElementType = nullptr,
                       SmallVectorImpl<Instruction *> *Casts = nullptr);
 
   /// Start value.
@@ -396,9 +390,6 @@ private:
   const SCEV *Step = nullptr;
   // Instruction that advances induction variable.
   BinaryOperator *InductionBinOp = nullptr;
-  // Element type for pointer induction variables.
-  // TODO: This can be dropped once support for typed pointers is removed.
-  Type *ElementType = nullptr;
   // Instructions used for type-casts of the induction variable,
   // that are redundant when guarded with a runtime SCEV overflow check.
   SmallVector<Instruction *, 2> RedundantCasts;

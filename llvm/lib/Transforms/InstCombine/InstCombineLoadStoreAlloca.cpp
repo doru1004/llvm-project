@@ -404,9 +404,8 @@ void PointerReplacer::replace(Instruction *I) {
   } else if (auto *BC = dyn_cast<BitCastInst>(I)) {
     auto *V = getReplacement(BC->getOperand(0));
     assert(V && "Operand not replaced");
-    auto *NewT = PointerType::getWithSamePointeeType(
-        cast<PointerType>(BC->getType()),
-        V->getType()->getPointerAddressSpace());
+    auto *NewT = PointerType::get(BC->getType()->getContext(),
+                                  V->getType()->getPointerAddressSpace());
     auto *NewI = new BitCastInst(V, NewT);
     IC.InsertNewInstWith(NewI, *BC);
     NewI->takeName(BC);
@@ -1561,10 +1560,16 @@ Instruction *InstCombinerImpl::visitStoreInst(StoreInst &SI) {
 
   // This is a non-terminator unreachable marker. Don't remove it.
   if (isa<UndefValue>(Ptr)) {
-    // Remove all instructions after the marker and guaranteed-to-transfer
-    // instructions before the marker.
-    if (handleUnreachableFrom(SI.getNextNode()) ||
-        removeInstructionsBeforeUnreachable(SI))
+    // Remove guaranteed-to-transfer instructions before the marker.
+    if (removeInstructionsBeforeUnreachable(SI))
+      return &SI;
+
+    // Remove all instructions after the marker and handle dead blocks this
+    // implies.
+    SmallVector<BasicBlock *> Worklist;
+    bool Changed = handleUnreachableFrom(SI.getNextNode(), Worklist);
+    Changed |= handlePotentiallyDeadBlocks(Worklist);
+    if (Changed)
       return &SI;
     return nullptr;
   }

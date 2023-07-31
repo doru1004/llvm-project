@@ -689,10 +689,13 @@ void JITDylib::removeGenerator(DefinitionGenerator &G) {
 }
 
 Expected<SymbolFlagsMap>
-JITDylib::defineMaterializing(SymbolFlagsMap SymbolFlags) {
-  // TODO: Should we bail out early here if MR is defunct?
+JITDylib::defineMaterializing(MaterializationResponsibility &FromMR,
+                              SymbolFlagsMap SymbolFlags) {
 
   return ES.runSessionLocked([&]() -> Expected<SymbolFlagsMap> {
+    if (FromMR.RT->isDefunct())
+      return make_error<ResourceTrackerDefunct>(FromMR.RT);
+
     std::vector<NonOwningSymbolStringPtr> AddedSyms;
     std::vector<NonOwningSymbolStringPtr> RejectedWeakDefs;
 
@@ -1915,16 +1918,14 @@ ExecutionSession::~ExecutionSession() {
 Error ExecutionSession::endSession() {
   LLVM_DEBUG(dbgs() << "Ending ExecutionSession " << this << "\n");
 
-  std::vector<JITDylibSP> JITDylibsToClose = runSessionLocked([&] {
+  auto JDsToRemove = runSessionLocked([&] {
     SessionOpen = false;
-    return std::move(JDs);
+    return JDs;
   });
 
-  // TODO: notifiy platform? run static deinits?
+  std::reverse(JDsToRemove.begin(), JDsToRemove.end());
 
-  Error Err = Error::success();
-  for (auto &JD : reverse(JITDylibsToClose))
-    Err = joinErrors(std::move(Err), JD->clear());
+  auto Err = removeJITDylibs(std::move(JDsToRemove));
 
   Err = joinErrors(std::move(Err), EPC->disconnect());
 
@@ -1960,6 +1961,7 @@ JITDylib *ExecutionSession::getJITDylibByName(StringRef Name) {
 JITDylib &ExecutionSession::createBareJITDylib(std::string Name) {
   assert(!getJITDylibByName(Name) && "JITDylib with that name already exists");
   return runSessionLocked([&, this]() -> JITDylib & {
+    assert(SessionOpen && "Cannot create JITDylib after session is closed");
     JDs.push_back(new JITDylib(*this, std::move(Name)));
     return *JDs.back();
   });
@@ -1973,42 +1975,44 @@ Expected<JITDylib &> ExecutionSession::createJITDylib(std::string Name) {
   return JD;
 }
 
-Error ExecutionSession::removeJITDylib(JITDylib &JD) {
-  // Keep JD alive throughout this routine, even if all other references
-  // have been dropped.
-  JITDylibSP JDKeepAlive = &JD;
+Error ExecutionSession::removeJITDylibs(std::vector<JITDylibSP> JDsToRemove) {
 
   // Set JD to 'Closing' state and remove JD from the ExecutionSession.
   runSessionLocked([&] {
-    assert(JD.State == JITDylib::Open && "JD already closed");
-    JD.State = JITDylib::Closing;
-    auto I = llvm::find(JDs, &JD);
-    assert(I != JDs.end() && "JD does not appear in session JDs");
-    JDs.erase(I);
+    for (auto &JD : JDsToRemove) {
+      assert(JD->State == JITDylib::Open && "JD already closed");
+      JD->State = JITDylib::Closing;
+      auto I = llvm::find(JDs, JD);
+      assert(I != JDs.end() && "JD does not appear in session JDs");
+      JDs.erase(I);
+    }
   });
 
-  // Clear the JITDylib. Hold on to any error while we clean up the
-  // JITDylib members below.
-  auto Err = JD.clear();
-
-  // Notify the platform of the teardown.
-  if (P)
-    Err = joinErrors(std::move(Err), P->teardownJITDylib(JD));
+  // Clear JITDylibs and notify the platform.
+  Error Err = Error::success();
+  for (auto JD : JDsToRemove) {
+    Err = joinErrors(std::move(Err), JD->clear());
+    if (P)
+      Err = joinErrors(std::move(Err), P->teardownJITDylib(*JD));
+  }
 
   // Set JD to closed state. Clear remaining data structures.
   runSessionLocked([&] {
-    assert(JD.State == JITDylib::Closing && "JD should be closing");
-    JD.State = JITDylib::Closed;
-    assert(JD.Symbols.empty() && "JD.Symbols is not empty after clear");
-    assert(JD.UnmaterializedInfos.empty() &&
-           "JD.UnmaterializedInfos is not empty after clear");
-    assert(JD.MaterializingInfos.empty() &&
-           "JD.MaterializingInfos is not empty after clear");
-    assert(JD.TrackerSymbols.empty() &&
-           "TrackerSymbols is not empty after clear");
-    JD.DefGenerators.clear();
-    JD.LinkOrder.clear();
+    for (auto &JD : JDsToRemove) {
+      assert(JD->State == JITDylib::Closing && "JD should be closing");
+      JD->State = JITDylib::Closed;
+      assert(JD->Symbols.empty() && "JD.Symbols is not empty after clear");
+      assert(JD->UnmaterializedInfos.empty() &&
+             "JD.UnmaterializedInfos is not empty after clear");
+      assert(JD->MaterializingInfos.empty() &&
+             "JD.MaterializingInfos is not empty after clear");
+      assert(JD->TrackerSymbols.empty() &&
+             "TrackerSymbols is not empty after clear");
+      JD->DefGenerators.clear();
+      JD->LinkOrder.clear();
+    }
   });
+
   return Err;
 }
 
@@ -2966,7 +2970,7 @@ Error ExecutionSession::OL_defineMaterializing(
            << NewSymbolFlags << "\n";
   });
   if (auto AcceptedDefs =
-          MR.JD.defineMaterializing(std::move(NewSymbolFlags))) {
+          MR.JD.defineMaterializing(MR, std::move(NewSymbolFlags))) {
     // Add all newly accepted symbols to this responsibility object.
     for (auto &KV : *AcceptedDefs)
       MR.SymbolFlags.insert(KV);

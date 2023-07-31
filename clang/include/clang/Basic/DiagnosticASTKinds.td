@@ -351,6 +351,9 @@ def note_constexpr_new_negative : Note<
   "cannot allocate array; evaluated array bound %0 is negative">;
 def note_constexpr_new_too_large : Note<
   "cannot allocate array; evaluated array bound %0 is too large">;
+def note_constexpr_new_exceeds_limits : Note<
+  "cannot allocate array; evaluated array bound %0 exceeds the limit (%1); "
+  "use '-fconstexpr-steps' to increase this limit">;
 def note_constexpr_new_too_small : Note<
   "cannot allocate array; evaluated array bound %0 is too small to hold "
   "%1 explicitly initialized elements">;
@@ -781,7 +784,7 @@ def err_module_odr_violation_field : Error<
   "%select{non-|}5bitfield %4|"
   "bitfield %4 with one width expression|"
   "%select{non-|}5mutable field %4|"
-  "field %4 with %select{no|an}5 initalizer|"
+  "field %4 with %select{no|an}5 initializer|"
   "field %4 with an initializer"
   "}3">;
 def note_module_odr_violation_field : Note<

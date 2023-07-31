@@ -23,6 +23,19 @@
 
 namespace llvm {
 
+static void removeSSACopy(Function &F) {
+  for (BasicBlock &BB : F) {
+    for (Instruction &Inst : llvm::make_early_inc_range(BB)) {
+      if (auto *II = dyn_cast<IntrinsicInst>(&Inst)) {
+        if (II->getIntrinsicID() != Intrinsic::ssa_copy)
+          continue;
+        Inst.replaceAllUsesWith(II->getOperand(0));
+        Inst.eraseFromParent();
+      }
+    }
+  }
+}
+
 class FunctionSpecializationTest : public testing::Test {
 protected:
   LLVMContext Ctx;
@@ -76,6 +89,8 @@ protected:
     for (Argument &Arg : F->args())
       Solver->markOverdefined(&Arg);
     Solver->solveWhileResolvedUndefsIn(*M);
+
+    removeSSACopy(*F);
 
     return FunctionSpecializer(*Solver, *M, &FAM, GetBFI, GetTLI, GetTTI,
                                GetAC);
@@ -225,16 +240,17 @@ TEST_F(FunctionSpecializationTest, BranchInst) {
 
 TEST_F(FunctionSpecializationTest, Misc) {
   const char *ModuleString = R"(
-    @g = constant [2 x i32] zeroinitializer, align 4
+    %struct_t = type { [8 x i16], [8 x i16], i32, i32, i32, ptr, [8 x i8] }
+    @g = constant %struct_t zeroinitializer, align 16
 
     declare i32 @llvm.smax.i32(i32, i32)
     declare i32 @bar(i32)
 
     define i32 @foo(i8 %a, i1 %cond, ptr %b, i32 %c) {
       %cmp = icmp eq i8 %a, 10
-      %ext = zext i1 %cmp to i32
-      %sel = select i1 %cond, i32 %ext, i32 1
-      %gep = getelementptr i32, ptr %b, i32 %sel
+      %ext = zext i1 %cmp to i64
+      %sel = select i1 %cond, i64 %ext, i64 1
+      %gep = getelementptr inbounds %struct_t, ptr %b, i64 %sel, i32 4
       %ld = load i32, ptr %gep
       %fr = freeze i32 %ld
       %smax = call i32 @llvm.smax.i32(i32 %fr, i32 1)
@@ -286,3 +302,69 @@ TEST_F(FunctionSpecializationTest, Misc) {
   Bonus = Specializer.getSpecializationBonus(F->getArg(3), Undef, Visitor);
   EXPECT_TRUE(Bonus == 0);
 }
+
+TEST_F(FunctionSpecializationTest, PhiNode) {
+  const char *ModuleString = R"(
+    define void @foo(i32 %a, i32 %b, i32 %i) {
+    entry:
+      br label %loop
+    loop:
+      %0 = phi i32 [ %a, %entry ], [ %3, %bb ]
+      switch i32 %i, label %default
+      [ i32 1, label %case1
+        i32 2, label %case2 ]
+    case1:
+      %1 = add i32 %0, 1
+      br label %bb
+    case2:
+      %2 = phi i32 [ %a, %entry ], [ %0, %loop ]
+      br label %bb
+    bb:
+      %3 = phi i32 [ %b, %case1 ], [ %2, %case2 ], [ %3, %bb ]
+      %4 = icmp eq i32 %3, 1
+      br i1 %4, label %bb, label %loop
+    default:
+      ret void
+    }
+  )";
+
+  Module &M = parseModule(ModuleString);
+  Function *F = M.getFunction("foo");
+  FunctionSpecializer Specializer = getSpecializerFor(F);
+  InstCostVisitor Visitor = Specializer.getInstCostVisitorFor(F);
+
+  Constant *One = ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 1);
+
+  auto FuncIter = F->begin();
+  BasicBlock &Loop = *++FuncIter;
+  BasicBlock &Case1 = *++FuncIter;
+  BasicBlock &Case2 = *++FuncIter;
+  BasicBlock &BB = *++FuncIter;
+
+  Instruction &PhiLoop = Loop.front();
+  Instruction &Add = Case1.front();
+  Instruction &PhiCase2 = Case2.front();
+  Instruction &BrBB = Case2.back();
+  Instruction &PhiBB = BB.front();
+  Instruction &Icmp = *++BB.begin();
+
+  Cost Bonus = Specializer.getSpecializationBonus(F->getArg(0), One, Visitor);
+  EXPECT_EQ(Bonus, 0);
+
+  Bonus = Specializer.getSpecializationBonus(F->getArg(1), One, Visitor);
+  EXPECT_EQ(Bonus, 0);
+
+  // phi + br
+  Cost Ref = getInstCost(PhiCase2) + getInstCost(BrBB);
+  Bonus = Specializer.getSpecializationBonus(F->getArg(2), One, Visitor);
+  EXPECT_EQ(Bonus, Ref);
+  EXPECT_TRUE(Bonus > 0);
+
+  // phi + phi + add + icmp
+  Ref = getInstCost(PhiBB) + getInstCost(PhiLoop) + getInstCost(Add) +
+        getInstCost(Icmp);
+  Bonus = Visitor.getBonusFromPendingPHIs();
+  EXPECT_EQ(Bonus, Ref);
+  EXPECT_TRUE(Bonus > 0);
+}
+

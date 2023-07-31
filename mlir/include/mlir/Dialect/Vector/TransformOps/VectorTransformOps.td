@@ -306,13 +306,12 @@ def ApplyTransferToScfPatternsOp : Op<Transform_Dialect,
   }];
 }
 
-def ApplyFoldTensorSliceIntoTransferPatternsOp : Op<Transform_Dialect,
-    "apply_patterns.vector.fold_tensor_slice_into_transfer",
+def ApplyFoldArithExtensionPatternsOp : Op<Transform_Dialect,
+    "apply_patterns.vector.fold_arith_extension",
     [DeclareOpInterfaceMethods<PatternDescriptorOpInterface>]> {
   let description = [{
-    Indicates that tensor.extract_slice -> vector.transfer_read and
-    vector.transfer_write -> tensor.insert_slice op chains should be folded into
-    vector tranfer read and write ops
+    Collect a set of patterns that fold arithmetic extension on floating point
+    into vector contract for the backends with native support.
   }];
 
   let assemblyFormat = "attr-dict";

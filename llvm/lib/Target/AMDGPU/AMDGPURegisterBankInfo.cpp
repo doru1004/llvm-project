@@ -193,6 +193,7 @@ public:
 };
 
 }
+
 AMDGPURegisterBankInfo::AMDGPURegisterBankInfo(const GCNSubtarget &ST)
     : Subtarget(ST), TRI(Subtarget.getRegisterInfo()),
       TII(Subtarget.getInstrInfo()) {
@@ -337,7 +338,7 @@ AMDGPURegisterBankInfo::addMappingFromTable(
 RegisterBankInfo::InstructionMappings
 AMDGPURegisterBankInfo::getInstrAlternativeMappingsIntrinsic(
     const MachineInstr &MI, const MachineRegisterInfo &MRI) const {
-  switch (MI.getIntrinsicID()) {
+  switch (cast<GIntrinsic>(MI).getIntrinsicID()) {
   case Intrinsic::amdgcn_readlane: {
     static const OpRegBankEntry<3> Table[2] = {
       // Perfectly legal.
@@ -378,7 +379,7 @@ RegisterBankInfo::InstructionMappings
 AMDGPURegisterBankInfo::getInstrAlternativeMappingsIntrinsicWSideEffects(
     const MachineInstr &MI, const MachineRegisterInfo &MRI) const {
 
-  switch (MI.getIntrinsicID()) {
+  switch (cast<GIntrinsic>(MI).getIntrinsicID()) {
   case Intrinsic::amdgcn_s_buffer_load: {
     static const OpRegBankEntry<2> Table[4] = {
       // Perfectly legal.
@@ -632,8 +633,10 @@ AMDGPURegisterBankInfo::getInstrAlternativeMappings(
     return AltMappings;
   }
   case AMDGPU::G_INTRINSIC:
+  case AMDGPU::G_INTRINSIC_CONVERGENT:
     return getInstrAlternativeMappingsIntrinsic(MI, MRI);
   case AMDGPU::G_INTRINSIC_W_SIDE_EFFECTS:
+  case AMDGPU::G_INTRINSIC_CONVERGENT_W_SIDE_EFFECTS:
     return getInstrAlternativeMappingsIntrinsicWSideEffects(MI, MRI);
   default:
     break;
@@ -922,8 +925,7 @@ bool AMDGPURegisterBankInfo::executeInWaterfallLoop(
 
   // The ballot becomes a no-op during instruction selection.
   CondReg = B.buildIntrinsic(Intrinsic::amdgcn_ballot,
-                             {LLT::scalar(Subtarget.isWave32() ? 32 : 64)},
-                             false)
+                             {LLT::scalar(Subtarget.isWave32() ? 32 : 64)})
                 .addReg(CondReg)
                 .getReg(0);
   MRI.setRegClass(CondReg, WaveRC);
@@ -1451,7 +1453,7 @@ bool AMDGPURegisterBankInfo::applyMappingBFE(const OperandsMapper &OpdMapper,
 
   const LLT S32 = LLT::scalar(32);
 
-  unsigned FirstOpnd = MI.getOpcode() == AMDGPU::G_INTRINSIC ? 2 : 1;
+  unsigned FirstOpnd = isa<GIntrinsic>(MI) ? 2 : 1;
   Register SrcReg = MI.getOperand(FirstOpnd).getReg();
   Register OffsetReg = MI.getOperand(FirstOpnd + 1).getReg();
   Register WidthReg = MI.getOperand(FirstOpnd + 2).getReg();
@@ -2948,8 +2950,9 @@ void AMDGPURegisterBankInfo::applyMappingImpl(
     applyMappingSBufferLoad(OpdMapper);
     return;
   }
-  case AMDGPU::G_INTRINSIC: {
-    switch (MI.getIntrinsicID()) {
+  case AMDGPU::G_INTRINSIC:
+  case AMDGPU::G_INTRINSIC_CONVERGENT: {
+    switch (cast<GIntrinsic>(MI).getIntrinsicID()) {
     case Intrinsic::amdgcn_readlane: {
       substituteSimpleCopyRegs(OpdMapper, 2);
 
@@ -3019,8 +3022,8 @@ void AMDGPURegisterBankInfo::applyMappingImpl(
   case AMDGPU::G_AMDGPU_INTRIN_IMAGE_LOAD_D16:
   case AMDGPU::G_AMDGPU_INTRIN_IMAGE_STORE:
   case AMDGPU::G_AMDGPU_INTRIN_IMAGE_STORE_D16: {
-    const AMDGPU::RsrcIntrinsic *RSrcIntrin
-      = AMDGPU::lookupRsrcIntrinsic(MI.getIntrinsicID());
+    const AMDGPU::RsrcIntrinsic *RSrcIntrin =
+        AMDGPU::lookupRsrcIntrinsic(AMDGPU::getIntrinsicID(MI));
     assert(RSrcIntrin && RSrcIntrin->IsImage);
     // Non-images can have complications from operands that allow both SGPR
     // and VGPR. For now it's too complicated to figure out the final opcode
@@ -3034,8 +3037,9 @@ void AMDGPURegisterBankInfo::applyMappingImpl(
     executeInWaterfallLoop(MI, MRI, { N });
     return;
   }
-  case AMDGPU::G_INTRINSIC_W_SIDE_EFFECTS: {
-    auto IntrID = MI.getIntrinsicID();
+  case AMDGPU::G_INTRINSIC_W_SIDE_EFFECTS:
+  case AMDGPU::G_INTRINSIC_CONVERGENT_W_SIDE_EFFECTS: {
+    auto IntrID = cast<GIntrinsic>(MI).getIntrinsicID();
     switch (IntrID) {
     case Intrinsic::amdgcn_ds_ordered_add:
     case Intrinsic::amdgcn_ds_ordered_swap: {
@@ -4197,8 +4201,9 @@ AMDGPURegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
     OpdsMapping[0] = AMDGPU::getValueMapping(ResultBank, Size0);
     break;
   }
-  case AMDGPU::G_INTRINSIC: {
-    switch (MI.getIntrinsicID()) {
+  case AMDGPU::G_INTRINSIC:
+  case AMDGPU::G_INTRINSIC_CONVERGENT: {
+    switch (cast<GIntrinsic>(MI).getIntrinsicID()) {
     default:
       return getInvalidInstructionMapping();
     case Intrinsic::amdgcn_div_fmas:
@@ -4514,6 +4519,16 @@ AMDGPURegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
       OpdsMapping[2] = AMDGPU::getValueMapping(MaskBank, MaskSize);
       break;
     }
+    case Intrinsic::amdgcn_wave_reduce_umin:
+    case Intrinsic::amdgcn_wave_reduce_umax: {
+      unsigned DstSize = MRI.getType(MI.getOperand(0).getReg()).getSizeInBits();
+      OpdsMapping[0] = AMDGPU::getValueMapping(AMDGPU::SGPRRegBankID, DstSize);
+      unsigned OpSize = MRI.getType(MI.getOperand(2).getReg()).getSizeInBits();
+      auto regBankID =
+          isSALUMapping(MI) ? AMDGPU::SGPRRegBankID : AMDGPU::VGPRRegBankID;
+      OpdsMapping[2] = AMDGPU::getValueMapping(regBankID, OpSize);
+      break;
+    }
     }
     break;
   }
@@ -4521,7 +4536,7 @@ AMDGPURegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case AMDGPU::G_AMDGPU_INTRIN_IMAGE_LOAD_D16:
   case AMDGPU::G_AMDGPU_INTRIN_IMAGE_STORE:
   case AMDGPU::G_AMDGPU_INTRIN_IMAGE_STORE_D16: {
-    auto IntrID = MI.getIntrinsicID();
+    auto IntrID = AMDGPU::getIntrinsicID(MI);
     const AMDGPU::RsrcIntrinsic *RSrcIntrin = AMDGPU::lookupRsrcIntrinsic(IntrID);
     assert(RSrcIntrin && "missing RsrcIntrinsic for image intrinsic");
     // Non-images can have complications from operands that allow both SGPR
@@ -4549,8 +4564,9 @@ AMDGPURegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
     }
     break;
   }
-  case AMDGPU::G_INTRINSIC_W_SIDE_EFFECTS: {
-    auto IntrID = MI.getIntrinsicID();
+  case AMDGPU::G_INTRINSIC_W_SIDE_EFFECTS:
+  case AMDGPU::G_INTRINSIC_CONVERGENT_W_SIDE_EFFECTS: {
+    auto IntrID = cast<GIntrinsic>(MI).getIntrinsicID();
     switch (IntrID) {
     case Intrinsic::amdgcn_s_getreg:
     case Intrinsic::amdgcn_s_memtime:
