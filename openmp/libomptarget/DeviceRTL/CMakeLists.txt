@@ -129,6 +129,12 @@ set(bc_flags -c -foffload-lto -std=c++17 -fvisibility=hidden
              ${LIBOMPTARGET_LLVM_INCLUDE_DIRS_DEVICERTL}
 )
 
+# if(${LIBOMPTARGET_DEVICE_DEBUG})
+#   list(APPEND bc_flags -DOMPTARGET_DEBUG=-1)
+# else()
+#   list(APPEND bc_flags -DOMPTARGET_DEBUG=0)
+# endif()
+
 # first create an object target
 add_library(omptarget.devicertl.all_objs OBJECT IMPORTED)
 function(compileDeviceRTLLibrary target_cpu target_name target_triple)
@@ -176,7 +182,6 @@ function(compileDeviceRTLLibrary target_cpu target_name target_triple)
       DEPENDS ${bc_files}
       COMMENT "Linking LLVM bitcode ${bclib_name}"
   )
-
   if(TARGET llvm-link)
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/linked_${bclib_name}
       DEPENDS llvm-link

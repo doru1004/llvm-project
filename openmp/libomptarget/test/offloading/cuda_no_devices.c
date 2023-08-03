@@ -3,8 +3,7 @@
 // complaint anymore, especially when the user isn't targeting CUDA.
 
 // RUN: %libomptarget-compile-generic
-// RUN: env CUDA_VISIBLE_DEVICES= \
-// RUN:   %libomptarget-run-generic 2>&1 | %fcheck-generic
+// RUN: env CUDA_VISIBLE_DEVICES=  %libomptarget-run-generic 2>&1 | %fcheck-generic
 
 #include <stdio.h>
 
@@ -14,7 +13,9 @@
 int main() {
   int x = 0;
 #pragma omp target teams num_teams(2) reduction(+ : x)
-  x += 2;
+  {
+    x += 2;
+  }
   printf("Hello World: %d\n", x);
   return 0;
 }
