@@ -175,7 +175,6 @@ public:
     MipsTechnologies,
     NVIDIA,
     CSR,
-    Myriad,
     AMD,
     Mesa,
     SUSE,
@@ -185,8 +184,6 @@ public:
   enum OSType {
     UnknownOS,
 
-    Ananas,
-    CloudABI,
     Darwin,
     DragonFly,
     FreeBSD,
@@ -199,10 +196,10 @@ public:
     NetBSD,
     OpenBSD,
     Solaris,
+    UEFI,
     Win32,
     ZOS,
     Haiku,
-    Minix,
     RTEMS,
     NaCl,       // Native Client
     AIX,
@@ -216,14 +213,14 @@ public:
     WatchOS,    // Apple watchOS
     DriverKit,  // Apple DriverKit
     Mesa3D,
-    Contiki,
     AMDPAL,     // AMD PAL Runtime
     HermitCore, // HermitCore Unikernel/Multikernel
     Hurd,       // GNU/Hurd
     WASI,       // Experimental WebAssembly OS
     Emscripten,
     ShaderModel, // DirectX ShaderModel
-    LastOSType = ShaderModel
+    LiteOS,
+    LastOSType = LiteOS
   };
   enum EnvironmentType {
     UnknownEnvironment,
@@ -273,8 +270,8 @@ public:
     Callable,
     Mesh,
     Amplification,
-
-    LastEnvironmentType = Amplification
+    OpenHOS,
+    LastEnvironmentType = OpenHOS
   };
   enum ObjectFormatType {
     UnknownObjectFormat,
@@ -570,13 +567,14 @@ public:
            Env == Triple::GNUX32;
   }
 
-  bool isOSContiki() const {
-    return getOS() == Triple::Contiki;
-  }
-
   /// Tests whether the OS is Haiku.
   bool isOSHaiku() const {
     return getOS() == Triple::Haiku;
+  }
+
+  /// Tests whether the OS is UEFI.
+  bool isUEFI() const {
+    return getOS() == Triple::UEFI;
   }
 
   /// Tests whether the OS is Windows.
@@ -740,8 +738,17 @@ public:
     return getEnvironment() == Triple::Musl ||
            getEnvironment() == Triple::MuslEABI ||
            getEnvironment() == Triple::MuslEABIHF ||
-           getEnvironment() == Triple::MuslX32;
+           getEnvironment() == Triple::MuslX32 ||
+           getEnvironment() == Triple::OpenHOS || isOSLiteOS();
   }
+
+  /// Tests whether the target is OHOS
+  /// LiteOS default enviroment is also OHOS, but omited on triple.
+  bool isOHOSFamily() const { return isOpenHOS() || isOSLiteOS(); }
+
+  bool isOpenHOS() const { return getEnvironment() == Triple::OpenHOS; }
+
+  bool isOSLiteOS() const { return getOS() == Triple::LiteOS; }
 
   /// Tests whether the target is DXIL.
   bool isDXIL() const {
@@ -789,6 +796,7 @@ public:
             getEnvironment() == Triple::MuslEABI ||
             getEnvironment() == Triple::EABIHF ||
             getEnvironment() == Triple::GNUEABIHF ||
+            getEnvironment() == Triple::OpenHOS ||
             getEnvironment() == Triple::MuslEABIHF || isAndroid()) &&
            isOSBinFormatELF();
   }
@@ -846,10 +854,14 @@ public:
                : PointerWidth == 64;
   }
 
+  /// Tests whether the target is 32-bit LoongArch.
+  bool isLoongArch32() const { return getArch() == Triple::loongarch32; }
+
+  /// Tests whether the target is 64-bit LoongArch.
+  bool isLoongArch64() const { return getArch() == Triple::loongarch64; }
+
   /// Tests whether the target is LoongArch (32- and 64-bit).
-  bool isLoongArch() const {
-    return getArch() == Triple::loongarch32 || getArch() == Triple::loongarch64;
-  }
+  bool isLoongArch() const { return isLoongArch32() || isLoongArch64(); }
 
   /// Tests whether the target is MIPS 32-bit (little and big endian).
   bool isMIPS32() const {
@@ -880,6 +892,23 @@ public:
   /// Tests whether the target is 64-bit PowerPC (little and big endian).
   bool isPPC64() const {
     return getArch() == Triple::ppc64 || getArch() == Triple::ppc64le;
+  }
+
+  /// Tests whether the target 64-bit PowerPC big endian ABI is ELFv2.
+  bool isPPC64ELFv2ABI() const {
+    return (getArch() == Triple::ppc64 &&
+            ((getOS() == Triple::FreeBSD &&
+              (getOSMajorVersion() >= 13 || getOSVersion().empty())) ||
+             getOS() == Triple::OpenBSD || isMusl()));
+  }
+
+  /// Tests whether the target 32-bit PowerPC uses Secure PLT.
+  bool isPPC32SecurePlt() const {
+    return ((getArch() == Triple::ppc || getArch() == Triple::ppcle) &&
+            ((getOS() == Triple::FreeBSD &&
+              (getOSMajorVersion() >= 13 || getOSVersion().empty())) ||
+             getOS() == Triple::NetBSD || getOS() == Triple::OpenBSD ||
+             isMusl()));
   }
 
   /// Tests whether the target is 32-bit RISC-V.
@@ -951,8 +980,11 @@ public:
   }
 
   /// Tests whether the target uses emulated TLS as default.
+  ///
+  /// Note: Android API level 29 (10) introduced ELF TLS.
   bool hasDefaultEmulatedTLS() const {
-    return isAndroid() || isOSOpenBSD() || isWindowsCygwinEnvironment();
+    return (isAndroid() && isAndroidVersionLT(29)) || isOSOpenBSD() ||
+           isWindowsCygwinEnvironment() || isOHOSFamily();
   }
 
   /// Tests whether the target uses -data-sections as default.
@@ -1076,6 +1108,9 @@ public:
 
   /// Get the canonical name for the \p Kind environment.
   static StringRef getEnvironmentTypeName(EnvironmentType Kind);
+
+  /// Get the name for the \p Object format.
+  static StringRef getObjectFormatTypeName(ObjectFormatType ObjectFormat);
 
   /// @}
   /// @name Static helpers for converting alternate architecture names.

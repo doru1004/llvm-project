@@ -8,6 +8,7 @@
 #include "ContainerSizeEmptyCheck.h"
 #include "../utils/ASTUtils.h"
 #include "../utils/Matchers.h"
+#include "../utils/OptionsUtils.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Lex/Lexer.h"
@@ -17,6 +18,7 @@ using namespace clang::ast_matchers;
 
 namespace clang {
 namespace ast_matchers {
+
 AST_POLYMORPHIC_MATCHER_P2(hasAnyArgumentWithParam,
                            AST_POLYMORPHIC_SUPPORTED_TYPES(CallExpr,
                                                            CXXConstructExpr),
@@ -83,12 +85,23 @@ AST_MATCHER(Expr, usedInBooleanContext) {
   });
   return Result;
 }
+
 AST_MATCHER(CXXConstructExpr, isDefaultConstruction) {
   return Node.getConstructor()->isDefaultConstructor();
 }
+
 AST_MATCHER(QualType, isIntegralType) {
   return Node->isIntegralType(Finder->getASTContext());
 }
+
+AST_MATCHER_P(UserDefinedLiteral, hasLiteral,
+              clang::ast_matchers::internal::Matcher<Expr>, InnerMatcher) {
+  if (const Expr *CookedLiteral = Node.getCookedLiteral()) {
+    return InnerMatcher.matches(*CookedLiteral, Finder, Builder);
+  }
+  return false;
+}
+
 } // namespace ast_matchers
 namespace tidy::readability {
 
@@ -96,7 +109,14 @@ using utils::isBinaryOrTernary;
 
 ContainerSizeEmptyCheck::ContainerSizeEmptyCheck(StringRef Name,
                                                  ClangTidyContext *Context)
-    : ClangTidyCheck(Name, Context) {}
+    : ClangTidyCheck(Name, Context),
+      ExcludedComparisonTypes(utils::options::parseStringList(
+          Options.get("ExcludedComparisonTypes", "::std::array"))) {}
+
+void ContainerSizeEmptyCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
+  Options.store(Opts, "ExcludedComparisonTypes",
+                utils::options::serializeStringList(ExcludedComparisonTypes));
+}
 
 void ContainerSizeEmptyCheck::registerMatchers(MatchFinder *Finder) {
   const auto ValidContainerRecord = cxxRecordDecl(isSameOrDerivedFrom(
@@ -154,9 +174,11 @@ void ContainerSizeEmptyCheck::registerMatchers(MatchFinder *Finder) {
       this);
 
   // Comparison to empty string or empty constructor.
-  const auto WrongComparend = anyOf(
-      stringLiteral(hasSize(0)), cxxConstructExpr(isDefaultConstruction()),
-      cxxUnresolvedConstructExpr(argumentCountIs(0)));
+  const auto WrongComparend =
+      anyOf(stringLiteral(hasSize(0)),
+            userDefinedLiteral(hasLiteral(stringLiteral(hasSize(0)))),
+            cxxConstructExpr(isDefaultConstruction()),
+            cxxUnresolvedConstructExpr(argumentCountIs(0)));
   // Match the object being compared.
   const auto STLArg =
       anyOf(unaryOperator(
@@ -164,12 +186,26 @@ void ContainerSizeEmptyCheck::registerMatchers(MatchFinder *Finder) {
                 hasUnaryOperand(
                     expr(hasType(pointsTo(ValidContainer))).bind("Pointee"))),
             expr(hasType(ValidContainer)).bind("STLObject"));
+
+  const auto ExcludedComparisonTypesMatcher = qualType(anyOf(
+      hasDeclaration(
+          cxxRecordDecl(matchers::matchesAnyListedName(ExcludedComparisonTypes))
+              .bind("excluded")),
+      hasCanonicalType(hasDeclaration(
+          cxxRecordDecl(matchers::matchesAnyListedName(ExcludedComparisonTypes))
+              .bind("excluded")))));
+  const auto SameExcludedComparisonTypesMatcher =
+      qualType(anyOf(hasDeclaration(cxxRecordDecl(equalsBoundNode("excluded"))),
+                     hasCanonicalType(hasDeclaration(
+                         cxxRecordDecl(equalsBoundNode("excluded"))))));
+
   Finder->addMatcher(
-      binaryOperation(hasAnyOperatorName("==", "!="),
-                      hasOperands(WrongComparend,
-                                  STLArg),
-                          unless(hasAncestor(cxxMethodDecl(
-                              ofClass(equalsBoundNode("container"))))))
+      binaryOperation(
+          hasAnyOperatorName("==", "!="), hasOperands(WrongComparend, STLArg),
+          unless(allOf(hasLHS(hasType(ExcludedComparisonTypesMatcher)),
+                       hasRHS(hasType(SameExcludedComparisonTypesMatcher)))),
+          unless(hasAncestor(
+              cxxMethodDecl(ofClass(equalsBoundNode("container"))))))
           .bind("BinCmp"),
       this);
 }

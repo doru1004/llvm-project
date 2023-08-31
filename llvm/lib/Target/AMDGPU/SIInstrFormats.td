@@ -153,6 +153,12 @@ class InstSI <dag outs, dag ins, string asm = "",
   // This bit indicates that tied source will not be read.
   field bit TiedSourceNotRead = 0;
 
+  // This bit indicates that the instruction is never-uniform/divergent
+  field bit IsNeverUniform = 0;
+
+  // ds_gws_* instructions.
+  field bit GWS = 0;
+
   // These need to be kept in sync with the enum in SIInstrFlags.
   let TSFlags{0} = SALU;
   let TSFlags{1} = VALU;
@@ -233,6 +239,10 @@ class InstSI <dag outs, dag ins, string asm = "",
   let TSFlags{59} = IsWMMA;
 
   let TSFlags{60} = TiedSourceNotRead;
+
+  let TSFlags{61} = IsNeverUniform;
+  
+  let TSFlags{62} = GWS;
 
   let SchedRW = [Write32Bit];
 

@@ -31,6 +31,11 @@ class Pass;
 class TargetMachine;
 class raw_ostream;
 
+template <typename T> class IntrusiveRefCntPtr;
+namespace vfs {
+class FileSystem;
+} // namespace vfs
+
 } // End llvm namespace
 
 // List of target independent CodeGen pass IDs.
@@ -48,6 +53,13 @@ namespace llvm {
   /// last LLVM modifying pass to clean up blocks that are not reachable from
   /// the entry block.
   FunctionPass *createUnreachableBlockEliminationPass();
+
+  /// createGCEmptyBasicblocksPass - Empty basic blocks (basic blocks without
+  /// real code) appear as the result of optimization passes removing
+  /// instructions. These blocks confuscate profile analysis (e.g., basic block
+  /// sections) since they will share the address of their fallthrough blocks.
+  /// This pass garbage-collects such basic blocks.
+  MachineFunctionPass *createGCEmptyBasicBlocksPass();
 
   /// createBasicBlockSections Pass - This pass assigns sections to machine
   /// basic blocks and is enabled with -fbasic-block-sections.
@@ -494,8 +506,7 @@ namespace llvm {
   /// printing assembly.
   ModulePass *createMachineOutlinerPass(bool RunOnAllFunctions = true);
 
-  /// This pass expands the experimental reduction intrinsics into sequences of
-  /// shuffles.
+  /// This pass expands the reduction intrinsics into sequences of shuffles.
   FunctionPass *createExpandReductionsPass();
 
   // This pass replaces intrinsics operating on vector operands with calls to
@@ -537,7 +548,7 @@ namespace llvm {
   FunctionPass *createEHContGuardCatchretPass();
 
   /// Create Hardware Loop pass. \see HardwareLoops.cpp
-  FunctionPass *createHardwareLoopsPass();
+  FunctionPass *createHardwareLoopsLegacyPass();
 
   /// This pass inserts pseudo probe annotation for callsite profiling.
   FunctionPass *createPseudoProbeInserter();
@@ -551,9 +562,10 @@ namespace llvm {
   createMIRAddFSDiscriminatorsPass(sampleprof::FSDiscriminatorPass P);
 
   /// Read Flow Sensitive Profile.
-  FunctionPass *createMIRProfileLoaderPass(std::string File,
-                                           std::string RemappingFile,
-                                           sampleprof::FSDiscriminatorPass P);
+  FunctionPass *
+  createMIRProfileLoaderPass(std::string File, std::string RemappingFile,
+                             sampleprof::FSDiscriminatorPass P,
+                             IntrusiveRefCntPtr<vfs::FileSystem> FS);
 
   /// Creates MIR Debugify pass. \see MachineDebugify.cpp
   ModulePass *createDebugifyMachineModulePass();
@@ -591,6 +603,11 @@ namespace llvm {
 
   /// This pass converts conditional moves to conditional jumps when profitable.
   FunctionPass *createSelectOptimizePass();
+
+  FunctionPass *createCallBrPass();
+
+  /// Lowers KCFI operand bundles for indirect calls.
+  FunctionPass *createKCFIPass();
 } // End llvm namespace
 
 #endif

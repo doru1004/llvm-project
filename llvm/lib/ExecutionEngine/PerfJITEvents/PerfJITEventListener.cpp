@@ -275,7 +275,7 @@ void PerfJITEventListener::notifyObjectLoaded(
             SectionIndex = SectOrErr.get()->getIndex();
 
     // According to spec debugging info has to come before loading the
-    // corresonding code load.
+    // corresponding code load.
     DILineInfoTable Lines = Context->getLineInfoForAddressRange(
         {*AddrOrErr, SectionIndex}, Size, FileLineInfoKind::AbsoluteFilePath);
 
@@ -417,7 +417,7 @@ void PerfJITEventListener::NotifyCode(Expected<llvm::StringRef> &Symbol,
   rec.Prefix.Timestamp = perf_get_timestamp();
 
   rec.CodeSize = CodeSize;
-  rec.Vma = 0;
+  rec.Vma = CodeAddr;
   rec.CodeAddr = CodeAddr;
   rec.Pid = Pid;
   rec.Tid = get_threadid();

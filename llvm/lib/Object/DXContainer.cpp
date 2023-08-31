@@ -9,6 +9,7 @@
 #include "llvm/Object/DXContainer.h"
 #include "llvm/BinaryFormat/DXContainer.h"
 #include "llvm/Object/Error.h"
+#include "llvm/Support/Alignment.h"
 #include "llvm/Support/FormatVariadic.h"
 
 using namespace llvm;
@@ -91,6 +92,15 @@ Error DXContainer::parseHash(StringRef Part) {
   return Error::success();
 }
 
+Error DXContainer::parsePSVInfo(StringRef Part) {
+  if (PSVInfo)
+    return parseFailed("More than one PSV0 part is present in the file");
+  PSVInfo = DirectX::PSVRuntimeInfo(Part);
+  // Parsing the PSVRuntime info occurs late because we need to read data from
+  // other parts first.
+  return Error::success();
+}
+
 Error DXContainer::parsePartOffsets() {
   uint32_t LastOffset =
       sizeof(dxbc::Header) + (Header.PartCount * sizeof(uint32_t));
@@ -140,9 +150,23 @@ Error DXContainer::parsePartOffsets() {
       if (Error Err = parseHash(PartData))
         return Err;
       break;
+    case dxbc::PartType::PSV0:
+      if (Error Err = parsePSVInfo(PartData))
+        return Err;
+      break;
     case dxbc::PartType::Unknown:
       break;
     }
+  }
+
+  // Fully parsing the PSVInfo requires knowing the shader kind which we read
+  // out of the program header in the DXIL part.
+  if (PSVInfo) {
+    if (!DXIL)
+      return parseFailed("Cannot fully parse pipeline state validation "
+                         "information without DXIL part.");
+    if (Error Err = PSVInfo->parse(DXIL->first.ShaderKind))
+      return Err;
   }
   return Error::success();
 }
@@ -165,4 +189,161 @@ void DXContainer::PartIterator::updateIteratorImpl(const uint32_t Offset) {
   IteratorState.Data =
       StringRef(Current + sizeof(dxbc::PartHeader), IteratorState.Part.Size);
   IteratorState.Offset = Offset;
+}
+
+Error DirectX::PSVRuntimeInfo::parse(uint16_t ShaderKind) {
+  Triple::EnvironmentType ShaderStage = dxbc::getShaderStage(ShaderKind);
+
+  const char *Current = Data.begin();
+  if (Error Err = readInteger(Data, Current, Size))
+    return Err;
+  Current += sizeof(uint32_t);
+
+  StringRef PSVInfoData = Data.substr(sizeof(uint32_t), Size);
+
+  if (PSVInfoData.size() < Size)
+    return parseFailed(
+        "Pipeline state data extends beyond the bounds of the part");
+
+  using namespace dxbc::PSV;
+
+  const uint32_t PSVVersion = getVersion();
+
+  // Detect the PSVVersion by looking at the size field.
+  if (PSVVersion == 2) {
+    v2::RuntimeInfo Info;
+    if (Error Err = readStruct(PSVInfoData, Current, Info))
+      return Err;
+    if (sys::IsBigEndianHost)
+      Info.swapBytes(ShaderStage);
+    BasicInfo = Info;
+  } else if (PSVVersion == 1) {
+    v1::RuntimeInfo Info;
+    if (Error Err = readStruct(PSVInfoData, Current, Info))
+      return Err;
+    if (sys::IsBigEndianHost)
+      Info.swapBytes(ShaderStage);
+    BasicInfo = Info;
+  } else if (PSVVersion == 0) {
+    v0::RuntimeInfo Info;
+    if (Error Err = readStruct(PSVInfoData, Current, Info))
+      return Err;
+    if (sys::IsBigEndianHost)
+      Info.swapBytes(ShaderStage);
+    BasicInfo = Info;
+  } else
+    return parseFailed(
+        "Cannot read PSV Runtime Info, unsupported PSV version.");
+
+  Current += Size;
+
+  uint32_t ResourceCount = 0;
+  if (Error Err = readInteger(Data, Current, ResourceCount))
+    return Err;
+  Current += sizeof(uint32_t);
+
+  if (ResourceCount > 0) {
+    if (Error Err = readInteger(Data, Current, Resources.Stride))
+      return Err;
+    Current += sizeof(uint32_t);
+
+    size_t BindingDataSize = Resources.Stride * ResourceCount;
+    Resources.Data = Data.substr(Current - Data.begin(), BindingDataSize);
+
+    if (Resources.Data.size() < BindingDataSize)
+      return parseFailed(
+          "Resource binding data extends beyond the bounds of the part");
+
+    Current += BindingDataSize;
+  } else
+    Resources.Stride = sizeof(v2::ResourceBindInfo);
+
+  // PSV version 0 ends after the resource bindings.
+  if (PSVVersion == 0)
+    return Error::success();
+
+  // String table starts at a 4-byte offset.
+  Current = reinterpret_cast<const char *>(
+      alignTo<4>(reinterpret_cast<const uintptr_t>(Current)));
+
+  uint32_t StringTableSize = 0;
+  if (Error Err = readInteger(Data, Current, StringTableSize))
+    return Err;
+  if (StringTableSize % 4 != 0)
+    return parseFailed("String table misaligned");
+  Current += sizeof(uint32_t);
+  StringTable = StringRef(Current, StringTableSize);
+
+  Current += StringTableSize;
+
+  uint32_t SemanticIndexTableSize = 0;
+  if (Error Err = readInteger(Data, Current, SemanticIndexTableSize))
+    return Err;
+  Current += sizeof(uint32_t);
+
+  SemanticIndexTable.reserve(SemanticIndexTableSize);
+  for (uint32_t I = 0; I < SemanticIndexTableSize; ++I) {
+    uint32_t Index = 0;
+    if (Error Err = readInteger(Data, Current, Index))
+      return Err;
+    Current += sizeof(uint32_t);
+    SemanticIndexTable.push_back(Index);
+  }
+
+  uint8_t InputCount = getSigInputCount();
+  uint8_t OutputCount = getSigOutputCount();
+  uint8_t PatchOrPrimCount = getSigPatchOrPrimCount();
+
+  uint32_t ElementCount = InputCount + OutputCount + PatchOrPrimCount;
+
+  if (ElementCount > 0) {
+    if (Error Err = readInteger(Data, Current, SigInputElements.Stride))
+      return Err;
+    Current += sizeof(uint32_t);
+    // Assign the stride to all the arrays.
+    SigOutputElements.Stride = SigPatchOrPrimElements.Stride =
+        SigInputElements.Stride;
+
+    if (Data.end() - Current < ElementCount * SigInputElements.Stride)
+      return parseFailed(
+          "Signature elements extend beyond the size of the part");
+
+    size_t InputSize = SigInputElements.Stride * InputCount;
+    SigInputElements.Data = Data.substr(Current - Data.begin(), InputSize);
+    Current += InputSize;
+
+    size_t OutputSize = SigOutputElements.Stride * OutputCount;
+    SigOutputElements.Data = Data.substr(Current - Data.begin(), OutputSize);
+    Current += OutputSize;
+
+    size_t PSize = SigPatchOrPrimElements.Stride * PatchOrPrimCount;
+    SigPatchOrPrimElements.Data = Data.substr(Current - Data.begin(), PSize);
+    Current += PSize;
+  }
+
+  return Error::success();
+}
+
+uint8_t DirectX::PSVRuntimeInfo::getSigInputCount() const {
+  if (const auto *P = std::get_if<dxbc::PSV::v2::RuntimeInfo>(&BasicInfo))
+    return P->SigInputElements;
+  if (const auto *P = std::get_if<dxbc::PSV::v1::RuntimeInfo>(&BasicInfo))
+    return P->SigInputElements;
+  return 0;
+}
+
+uint8_t DirectX::PSVRuntimeInfo::getSigOutputCount() const {
+  if (const auto *P = std::get_if<dxbc::PSV::v2::RuntimeInfo>(&BasicInfo))
+    return P->SigOutputElements;
+  if (const auto *P = std::get_if<dxbc::PSV::v1::RuntimeInfo>(&BasicInfo))
+    return P->SigOutputElements;
+  return 0;
+}
+
+uint8_t DirectX::PSVRuntimeInfo::getSigPatchOrPrimCount() const {
+  if (const auto *P = std::get_if<dxbc::PSV::v2::RuntimeInfo>(&BasicInfo))
+    return P->SigPatchOrPrimElements;
+  if (const auto *P = std::get_if<dxbc::PSV::v1::RuntimeInfo>(&BasicInfo))
+    return P->SigPatchOrPrimElements;
+  return 0;
 }

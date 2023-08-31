@@ -190,7 +190,6 @@ StringRef Triple::getVendorTypeName(VendorType Kind) {
   case ImaginationTechnologies: return "img";
   case Mesa: return "mesa";
   case MipsTechnologies: return "mti";
-  case Myriad: return "myriad";
   case NVIDIA: return "nvidia";
   case OpenEmbedded: return "oe";
   case PC: return "pc";
@@ -208,10 +207,7 @@ StringRef Triple::getOSTypeName(OSType Kind) {
   case AIX: return "aix";
   case AMDHSA: return "amdhsa";
   case AMDPAL: return "amdpal";
-  case Ananas: return "ananas";
   case CUDA: return "cuda";
-  case CloudABI: return "cloudabi";
-  case Contiki: return "contiki";
   case Darwin: return "darwin";
   case DragonFly: return "dragonfly";
   case DriverKit: return "driverkit";
@@ -228,7 +224,6 @@ StringRef Triple::getOSTypeName(OSType Kind) {
   case Lv2: return "lv2";
   case MacOSX: return "macosx";
   case Mesa3D: return "mesa3d";
-  case Minix: return "minix";
   case NVCL: return "nvcl";
   case NaCl: return "nacl";
   case NetBSD: return "netbsd";
@@ -238,11 +233,13 @@ StringRef Triple::getOSTypeName(OSType Kind) {
   case RTEMS: return "rtems";
   case Solaris: return "solaris";
   case TvOS: return "tvos";
+  case UEFI: return "uefi";
   case WASI: return "wasi";
   case WatchOS: return "watchos";
   case Win32: return "windows";
   case ZOS: return "zos";
   case ShaderModel: return "shadermodel";
+  case LiteOS: return "liteos";
   }
 
   llvm_unreachable("Invalid OSType");
@@ -290,9 +287,25 @@ StringRef Triple::getEnvironmentTypeName(EnvironmentType Kind) {
   case Callable: return "callable";
   case Mesh: return "mesh";
   case Amplification: return "amplification";
+  case OpenHOS: return "ohos";
   }
 
   llvm_unreachable("Invalid EnvironmentType!");
+}
+
+StringRef Triple::getObjectFormatTypeName(ObjectFormatType Kind) {
+  switch (Kind) {
+  case UnknownObjectFormat: return "";
+  case COFF: return "coff";
+  case ELF: return "elf";
+  case GOFF: return "goff";
+  case MachO: return "macho";
+  case Wasm: return "wasm";
+  case XCOFF: return "xcoff";
+  case DXContainer: return "dxcontainer";
+  case SPIRV: return "spirv";
+  }
+  llvm_unreachable("unknown object format type");
 }
 
 static Triple::ArchType parseBPFArch(StringRef ArchName) {
@@ -547,7 +560,6 @@ static Triple::VendorType parseVendor(StringRef VendorName) {
     .Case("mti", Triple::MipsTechnologies)
     .Case("nvidia", Triple::NVIDIA)
     .Case("csr", Triple::CSR)
-    .Case("myriad", Triple::Myriad)
     .Case("amd", Triple::AMD)
     .Case("mesa", Triple::Mesa)
     .Case("suse", Triple::SUSE)
@@ -557,8 +569,6 @@ static Triple::VendorType parseVendor(StringRef VendorName) {
 
 static Triple::OSType parseOS(StringRef OSName) {
   return StringSwitch<Triple::OSType>(OSName)
-    .StartsWith("ananas", Triple::Ananas)
-    .StartsWith("cloudabi", Triple::CloudABI)
     .StartsWith("darwin", Triple::Darwin)
     .StartsWith("dragonfly", Triple::DragonFly)
     .StartsWith("freebsd", Triple::FreeBSD)
@@ -571,11 +581,11 @@ static Triple::OSType parseOS(StringRef OSName) {
     .StartsWith("netbsd", Triple::NetBSD)
     .StartsWith("openbsd", Triple::OpenBSD)
     .StartsWith("solaris", Triple::Solaris)
+    .StartsWith("uefi", Triple::UEFI)
     .StartsWith("win32", Triple::Win32)
     .StartsWith("windows", Triple::Win32)
     .StartsWith("zos", Triple::ZOS)
     .StartsWith("haiku", Triple::Haiku)
-    .StartsWith("minix", Triple::Minix)
     .StartsWith("rtems", Triple::RTEMS)
     .StartsWith("nacl", Triple::NaCl)
     .StartsWith("aix", Triple::AIX)
@@ -589,13 +599,13 @@ static Triple::OSType parseOS(StringRef OSName) {
     .StartsWith("watchos", Triple::WatchOS)
     .StartsWith("driverkit", Triple::DriverKit)
     .StartsWith("mesa3d", Triple::Mesa3D)
-    .StartsWith("contiki", Triple::Contiki)
     .StartsWith("amdpal", Triple::AMDPAL)
     .StartsWith("hermit", Triple::HermitCore)
     .StartsWith("hurd", Triple::Hurd)
     .StartsWith("wasi", Triple::WASI)
     .StartsWith("emscripten", Triple::Emscripten)
     .StartsWith("shadermodel", Triple::ShaderModel)
+    .StartsWith("liteos", Triple::LiteOS)
     .Default(Triple::UnknownOS);
 }
 
@@ -640,6 +650,7 @@ static Triple::EnvironmentType parseEnvironment(StringRef EnvironmentName) {
       .StartsWith("callable", Triple::Callable)
       .StartsWith("mesh", Triple::Mesh)
       .StartsWith("amplification", Triple::Amplification)
+      .StartsWith("ohos", Triple::OpenHOS)
       .Default(Triple::UnknownEnvironment);
 }
 
@@ -768,30 +779,6 @@ static Triple::SubArchType parseSubArch(StringRef SubArchName) {
   default:
     return Triple::NoSubArch;
   }
-}
-
-static StringRef getObjectFormatTypeName(Triple::ObjectFormatType Kind) {
-  switch (Kind) {
-  case Triple::UnknownObjectFormat:
-    return "";
-  case Triple::COFF:
-    return "coff";
-  case Triple::ELF:
-    return "elf";
-  case Triple::GOFF:
-    return "goff";
-  case Triple::MachO:
-    return "macho";
-  case Triple::Wasm:
-    return "wasm";
-  case Triple::XCOFF:
-    return "xcoff";
-  case Triple::DXContainer:
-    return "dxcontainer";
-  case Triple::SPIRV:
-    return "spirv";
-  }
-  llvm_unreachable("unknown object format type");
 }
 
 static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {

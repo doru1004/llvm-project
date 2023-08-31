@@ -24,6 +24,9 @@ namespace dataflow {
 
 class NoopAnalysis : public DataflowAnalysis<NoopAnalysis, NoopLattice> {
 public:
+  NoopAnalysis(ASTContext &Context)
+      : DataflowAnalysis<NoopAnalysis, NoopLattice>(Context) {}
+
   /// Deprecated. Use the `DataflowAnalysisOptions` constructor instead.
   NoopAnalysis(ASTContext &Context, bool ApplyBuiltinTransfer)
       : DataflowAnalysis<NoopAnalysis, NoopLattice>(Context,
@@ -38,7 +41,7 @@ public:
 
   static NoopLattice initialElement() { return {}; }
 
-  void transfer(const CFGElement *E, NoopLattice &L, Environment &Env) {}
+  void transfer(const CFGElement &E, NoopLattice &L, Environment &Env) {}
 };
 
 } // namespace dataflow

@@ -23,13 +23,14 @@ def Test_Dialect : Dialect {
   let hasNonDefaultDestructor = 1;
   let useDefaultTypePrinterParser = 0;
   let useDefaultAttributePrinterParser = 1;
-  let useFoldAPI = kEmitFoldAdaptorFolder;
   let isExtensible = 1;
   let dependentDialects = ["::mlir::DLTIDialect"];
 
   let extraClassDeclaration = [{
     void registerAttributes();
+    void registerInterfaces();
     void registerTypes();
+    void registerOpsSyntax();
 
     // Provides a custom printing/parsing for some operations.
     ::std::optional<ParseOpHook>

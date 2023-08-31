@@ -295,6 +295,36 @@ multiclass cp_cond_alias<string cond, int condVal> {
 
 // Instruction aliases for register conditional branches and moves.
 multiclass reg_cond_alias<string rcond, int condVal> {
+  // br<rcond> $rs1, $imm
+  def : InstAlias<!strconcat(!strconcat("br", rcond), " $rs1, $imm"),
+                  (BPR bprtarget16:$imm, condVal, I64Regs:$rs1)>,
+                  Requires<[Is64Bit]>;
+
+  // br<rcond>,pt $rs1, $imm
+  def : InstAlias<!strconcat(!strconcat("br", rcond), ",pt $rs1, $imm"),
+                  (BPR bprtarget16:$imm, condVal, I64Regs:$rs1)>,
+                  Requires<[Is64Bit]>;
+
+  // br<rcond>,pn $rs1, $imm
+  def : InstAlias<!strconcat(!strconcat("br", rcond), ",pn $rs1, $imm"),
+                  (BPRNT bprtarget16:$imm, condVal, I64Regs:$rs1)>,
+                  Requires<[Is64Bit]>;
+
+  // br<rcond>,a $rs1, $imm
+  def : InstAlias<!strconcat(!strconcat("br", rcond), ",a $rs1, $imm"),
+                  (BPRA bprtarget16:$imm, condVal, I64Regs:$rs1)>,
+                  Requires<[Is64Bit]>;
+
+  // br<rcond>,a,pt $rs1, $imm
+  def : InstAlias<!strconcat(!strconcat("br", rcond), ",a,pt $rs1, $imm"),
+                  (BPRA bprtarget16:$imm, condVal, I64Regs:$rs1)>,
+                  Requires<[Is64Bit]>;
+
+  // br<rcond>,a,pn $rs1, $imm
+  def : InstAlias<!strconcat(!strconcat("br", rcond), ",a,pn $rs1, $imm"),
+                  (BPRANT bprtarget16:$imm, condVal, I64Regs:$rs1)>,
+                  Requires<[Is64Bit]>;
+
   defm : regcond_mov_alias<rcond, condVal,
                             MOVRrr, MOVRri,
                             FMOVRS, FMOVRD, FMOVRQ>,
@@ -412,6 +442,13 @@ def : InstAlias<"save", (SAVErr G0, G0, G0)>;
 // (turns into a sequence of sethi+or, depending on the value)
 // def : InstAlias<"set $val, $rd", (ORri IntRegs:$rd, (SETHIi (HI22 imm:$val)), (LO10 imm:$val))>;
 def SET : AsmPseudoInst<(outs IntRegs:$rd), (ins i32imm:$val), "set $val, $rd">;
+
+// setx value, tmp, rd
+// (turns into a sequence of sethi+or+shift, depending on the value)
+def SETX : AsmPseudoInst<(outs I64Regs:$rd),
+                         (ins i64imm:$val, I64Regs:$tmp),
+                         "setx $val, $tmp, $rd">,
+                         Requires<[Is64Bit, HasV9]>;
 
 // not rd -> xnor rd, %g0, rd
 def : InstAlias<"not $rd", (XNORrr IntRegs:$rd, IntRegs:$rd, G0), 0>;
