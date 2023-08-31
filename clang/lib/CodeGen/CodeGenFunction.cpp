@@ -2197,6 +2197,10 @@ CodeGenFunction::getVLASize(const VariableArrayType *type) {
 
   QualType elementType;
   do {
+    printf("Array length type:\n");
+    type->dump();
+    printf("==========================\n");
+    // CurFn->dump();
     elementType = type->getElementType();
     llvm::Value *vlaSize = VLASizeMap[type->getSizeExpr()];
     assert(vlaSize && "no size for VLA!");

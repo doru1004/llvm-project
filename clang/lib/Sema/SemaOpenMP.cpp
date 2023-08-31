@@ -5492,6 +5492,7 @@ static void checkAllocateClauses(Sema &S, DSAStackTy *Stack,
     } else {
       llvm_unreachable("Expected private clause.");
     }
+    printf("Start iteration over privates %s:%d\n", __FILE__, __LINE__);
     for (Expr *E : llvm::make_range(It, Et)) {
       if (!*I) {
         ++I;
@@ -5502,10 +5503,15 @@ static void checkAllocateClauses(Sema &S, DSAStackTy *Stack,
       Expr *SimpleRefExpr = E;
       auto Res = getPrivateItem(S, SimpleRefExpr, ELoc, ERange,
                                 /*AllowArraySection=*/true);
+      printf("I Declaration\n");
+      cast<DeclRefExpr>(*I)->getDecl()->dump();
+      printf("Private item Res:\n");
+      Res.first->dump();
       DeclToCopy.try_emplace(Res.first,
                              cast<VarDecl>(cast<DeclRefExpr>(*I)->getDecl()));
       ++I;
     }
+    printf("End\n");
   }
   for (OMPClause *C : AllocateRange) {
     auto *AC = cast<OMPAllocateClause>(C);

@@ -10731,6 +10731,7 @@ void OMPClauseReader::VisitOMPSharedClause(OMPSharedClause *C) {
 }
 
 void OMPClauseReader::VisitOMPReductionClause(OMPReductionClause *C) {
+  printf("\n\n===> VisitOMPReductionClause\n");
   VisitOMPClauseWithPostUpdate(C);
   C->setLParenLoc(Record.readSourceLocation());
   C->setModifierLoc(Record.readSourceLocation());
@@ -10747,8 +10748,12 @@ void OMPClauseReader::VisitOMPReductionClause(OMPReductionClause *C) {
     Vars.push_back(Record.readSubExpr());
   C->setVarRefs(Vars);
   Vars.clear();
-  for (unsigned i = 0; i != NumVars; ++i)
-    Vars.push_back(Record.readSubExpr());
+  printf("===> START PRINTING PRIVATES 1\n");
+  for (unsigned i = 0; i != NumVars; ++i) {
+    Expr *expr = Record.readSubExpr();
+    expr->dump();
+    Vars.push_back(expr);
+  }
   C->setPrivates(Vars);
   Vars.clear();
   for (unsigned i = 0; i != NumVars; ++i)
@@ -10794,6 +10799,7 @@ void OMPClauseReader::VisitOMPTaskReductionClause(OMPTaskReductionClause *C) {
     Vars.push_back(Record.readSubExpr());
   C->setVarRefs(Vars);
   Vars.clear();
+  printf("===> START PRINTING PRIVATES 2\n");
   for (unsigned I = 0; I != NumVars; ++I)
     Vars.push_back(Record.readSubExpr());
   C->setPrivates(Vars);
@@ -10827,6 +10833,7 @@ void OMPClauseReader::VisitOMPInReductionClause(OMPInReductionClause *C) {
     Vars.push_back(Record.readSubExpr());
   C->setVarRefs(Vars);
   Vars.clear();
+  printf("===> START PRINTING PRIVATES 3\n");
   for (unsigned I = 0; I != NumVars; ++I)
     Vars.push_back(Record.readSubExpr());
   C->setPrivates(Vars);
@@ -10861,6 +10868,7 @@ void OMPClauseReader::VisitOMPLinearClause(OMPLinearClause *C) {
     Vars.push_back(Record.readSubExpr());
   C->setVarRefs(Vars);
   Vars.clear();
+  printf("===> START PRINTING PRIVATES 4\n");
   for (unsigned i = 0; i != NumVars; ++i)
     Vars.push_back(Record.readSubExpr());
   C->setPrivates(Vars);

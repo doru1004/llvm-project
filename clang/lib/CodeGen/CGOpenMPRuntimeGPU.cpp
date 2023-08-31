@@ -1557,6 +1557,8 @@ static void emitReductionListCopy(
   unsigned Idx = 0;
   unsigned Size = Privates.size();
   for (const Expr *Private : Privates) {
+    printf("Iterate through privates:\n");
+    Private->dump();
     Address SrcElementAddr = Address::invalid();
     Address DestElementAddr = Address::invalid();
     Address DestElementPtrAddr = Address::invalid();
