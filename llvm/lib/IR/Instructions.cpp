@@ -868,24 +868,12 @@ static Instruction *createMalloc(Instruction *InsertBefore,
   if (!MallocFunc)
     // prototype malloc as "void *malloc(size_t)"
     MallocFunc = M->getOrInsertFunction("malloc", BPTy, IntPtrTy);
-  PointerType *AllocPtrType = PointerType::getUnqual(AllocTy);
   CallInst *MCall = nullptr;
-  Instruction *Result = nullptr;
   if (InsertBefore) {
-    MCall = CallInst::Create(MallocFunc, AllocSize, OpB, "malloccall",
+    MCall = CallInst::Create(MallocFunc, AllocSize, OpB, Name,
                              InsertBefore);
-    Result = MCall;
-    if (Result->getType() != AllocPtrType)
-      // Create a cast instruction to convert to the right type...
-      Result = new BitCastInst(MCall, AllocPtrType, Name, InsertBefore);
   } else {
-    MCall = CallInst::Create(MallocFunc, AllocSize, OpB, "malloccall");
-    Result = MCall;
-    if (Result->getType() != AllocPtrType) {
-      MCall->insertInto(InsertAtEnd, InsertAtEnd->end());
-      // Create a cast instruction to convert to the right type...
-      Result = new BitCastInst(MCall, AllocPtrType, Name);
-    }
+    MCall = CallInst::Create(MallocFunc, AllocSize, OpB, Name);
   }
   MCall->setTailCall();
   if (Function *F = dyn_cast<Function>(MallocFunc.getCallee())) {
@@ -895,7 +883,7 @@ static Instruction *createMalloc(Instruction *InsertBefore,
   }
   assert(!MCall->getType()->isVoidTy() && "Malloc has void return type");
 
-  return Result;
+  return MCall;
 }
 
 /// CreateMalloc - Generate the IR for a call to malloc:
@@ -2719,10 +2707,10 @@ bool ShuffleVectorInst::isOneUseSingleSourceMask(ArrayRef<int> Mask, int VF) {
     if (all_of(SubMask, [](int Idx) { return Idx == PoisonMaskElem; }))
       continue;
     SmallBitVector Used(VF, false);
-    for_each(SubMask, [&Used, VF](int Idx) {
+    for (int Idx : SubMask) {
       if (Idx != PoisonMaskElem && Idx < VF)
         Used.set(Idx);
-    });
+    }
     if (!Used.all())
       return false;
   }
