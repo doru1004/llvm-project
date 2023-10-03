@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize="bufferize-function-boundaries allow-return-allocs" -cse -canonicalize -split-input-file | FileCheck %s
+// RUN: mlir-opt %s -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize="bufferize-function-boundaries" -cse -canonicalize -split-input-file | FileCheck %s
 
 //      CHECK: func @buffer_forwarding_conflict(
 // CHECK-SAME:   %[[FUNC_ARG:[0-9a-zA-Z]*]]: memref<?xf32>
@@ -305,3 +305,15 @@ func.func @materialize_in_destination(%t: tensor<5xf32>, %f: f32) -> tensor<5xf3
   return %1 : tensor<5xf32>
 }
 
+// -----
+
+// CHECK-LABEL: func @linalg_copy(
+//  CHECK-SAME:     %[[m:.*]]: memref<5xf32, strided<[?], offset: ?>>,
+//       CHECK:   linalg.fill {{.*}} outs(%[[m]]
+//       CHECK:   return %[[m]]
+func.func @linalg_copy(%t: tensor<5xf32>, %f: f32) -> tensor<5xf32> {
+  %0 = tensor.empty() : tensor<5xf32>
+  %filled = linalg.fill ins(%f : f32) outs(%0 : tensor<5xf32>) -> tensor<5xf32>
+  %1 = linalg.copy ins(%filled : tensor<5xf32>) outs(%t : tensor<5xf32>) -> tensor<5xf32>
+  return %1 : tensor<5xf32>
+}

@@ -187,20 +187,9 @@ LogicalResult AllocTensorOp::bufferize(RewriterBase &rewriter,
       return failure();
   }
 
-  // Should the buffer be deallocated?
-  bool dealloc =
-      shouldDeallocateOpResult(llvm::cast<OpResult>(getResult()), options);
-
   // Replace op.
   replaceOpWithBufferizedValues(rewriter, getOperation(), *alloc);
 
-  // Create buffer deallocation (if requested).
-  if (!dealloc)
-    return success();
-
-  rewriter.setInsertionPoint(rewriter.getInsertionBlock()->getTerminator());
-  if (failed(options.createDealloc(rewriter, loc, *alloc)))
-    return failure();
   return success();
 }
 
@@ -537,8 +526,7 @@ LogicalResult DeallocTensorOp::bufferize(RewriterBase &rewriter,
   FailureOr<Value> buffer = getBuffer(rewriter, getTensor(), options);
   if (failed(buffer))
     return failure();
-  if (failed(options.createDealloc(rewriter, getLoc(), *buffer)))
-    return failure();
+  rewriter.create<memref::DeallocOp>(getLoc(), *buffer);
   rewriter.eraseOp(getOperation());
   return success();
 }
@@ -776,6 +764,9 @@ LogicalResult DeallocOp::verify() {
   if (getMemrefs().size() != getConditions().size())
     return emitOpError(
         "must have the same number of conditions as memrefs to deallocate");
+  if (getRetained().size() != getUpdatedConditions().size())
+    return emitOpError("must have the same number of updated conditions "
+                       "(results) as retained operands");
   return success();
 }
 
