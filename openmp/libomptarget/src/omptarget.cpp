@@ -788,7 +788,10 @@ postProcessingTargetDataEnd(DeviceTy *Device,
   int Ret = OFFLOAD_SUCCESS;
 
   for (auto &[HstPtrBegin, DataSize, ArgType, TPR] : EntriesInfo) {
-    bool DelEntry = !TPR.isHostPointer();
+    // Delete entry from the mapping table even when we are dealing with a
+    // host pointer.
+    bool DelEntry = true;
+    // printf("postProcessingTargetDataEnd: Try to delete: %p\n", HstPtrBegin);
 
     // If the last element from the mapper (for end transfer args comes in
     // reverse order), do not remove the partial entry, the parent struct still
@@ -797,6 +800,7 @@ postProcessingTargetDataEnd(DeviceTy *Device,
         !(ArgType & OMP_TGT_MAPTYPE_PTR_AND_OBJ)) {
       DelEntry = false; // protect parent struct from being deallocated
     }
+    // printf("postProcessingTargetDataEnd 1: DelEntry = %d\n", DelEntry);
 
     // If we marked the entry to be deleted we need to verify no other
     // thread reused it by now. If deletion is still supposed to happen by
@@ -814,12 +818,14 @@ postProcessingTargetDataEnd(DeviceTy *Device,
     auto *Entry = TPR.getEntry();
 
     const bool IsNotLastUser = Entry->decDataEndThreadCount() != 0;
+    // printf("postProcessingTargetDataEnd 1.5: DelEntry = %d, Entry->getTotalRefCount() = %d, IsNotLastUser=%d\n", DelEntry, Entry->getTotalRefCount(), IsNotLastUser);
     if (DelEntry && (Entry->getTotalRefCount() != 0 || IsNotLastUser)) {
       // The thread is not in charge of deletion anymore. Give up access
       // to the HDTT map and unset the deletion flag.
       HDTTMap.destroy();
       DelEntry = false;
     }
+    // printf("postProcessingTargetDataEnd 2: DelEntry = %d\n", DelEntry);
 
     // If we copied back to the host a struct/array containing pointers,
     // we need to restore the original host pointer values from their
@@ -836,6 +842,7 @@ postProcessingTargetDataEnd(DeviceTy *Device,
             return OFFLOAD_SUCCESS;
           });
     }
+    // printf("postProcessingTargetDataEnd 3: DelEntry = %d\n", DelEntry);
 
     // Give up the lock as we either don't need it anymore (e.g., done with
     // TPR), or erase TPR.
@@ -843,14 +850,17 @@ postProcessingTargetDataEnd(DeviceTy *Device,
 
     if (!DelEntry)
       continue;
-
+    
+    // printf("postProcessingTargetDataEnd 4: ABOUT TO DELETE!!!\n");
     Ret = Device->eraseMapEntry(HDTTMap, Entry, DataSize);
     // Entry is already remove from the map, we can unlock it now.
     HDTTMap.destroy();
-    Ret |= Device->deallocTgtPtrAndEntry(Entry, DataSize);
-    if (Ret != OFFLOAD_SUCCESS) {
-      REPORT("Deallocating data from device failed.\n");
-      break;
+    if (!TPR.Flags.IsHostPointer) {
+      Ret |= Device->deallocTgtPtrAndEntry(Entry, DataSize);
+      if (Ret != OFFLOAD_SUCCESS) {
+        REPORT("Deallocating data from device failed.\n");
+        break;
+      }
     }
   }
 
@@ -865,10 +875,15 @@ int targetDataEnd(ident_t *Loc, DeviceTy &Device, int32_t ArgNum,
                   void **ArgMappers, AsyncInfoTy &AsyncInfo, bool FromMapper) {
   int Ret = OFFLOAD_SUCCESS;
   auto *PostProcessingPtrs = new SmallVector<PostProcessingInfo>();
+
+  // printf("targetDataEnd\n");
   // process each input.
   for (int32_t I = ArgNum - 1; I >= 0; --I) {
+    // printf("targetDataEnd: handling %p\n", HstPtrBegin);
     // Ignore private variables and arrays - there is no mapping for them.
     // Also, ignore the use_device_ptr directive, it has no effect here.
+    // printf("targetDataEnd: COND 1 = %d\n", (ArgTypes[I] & OMP_TGT_MAPTYPE_LITERAL) ||
+    //     (ArgTypes[I] & OMP_TGT_MAPTYPE_PRIVATE));
     if ((ArgTypes[I] & OMP_TGT_MAPTYPE_LITERAL) ||
         (ArgTypes[I] & OMP_TGT_MAPTYPE_PRIVATE))
       continue;
@@ -893,7 +908,7 @@ int targetDataEnd(ident_t *Loc, DeviceTy &Device, int32_t ArgNum,
       // Skip the rest of this function, continue to the next argument.
       continue;
     }
-
+    // printf("targetDataEnd: after COND 2\n");
     void *HstPtrBegin = Args[I];
     int64_t DataSize = ArgSizes[I];
     bool IsImplicit = ArgTypes[I] & OMP_TGT_MAPTYPE_IMPLICIT;
@@ -909,79 +924,95 @@ int targetDataEnd(ident_t *Loc, DeviceTy &Device, int32_t ArgNum,
         Device.getTgtPtrBegin(HstPtrBegin, DataSize, UpdateRef, HasHoldModifier,
                               !IsImplicit, ForceDelete, /*FromDataEnd=*/true);
     void *TgtPtrBegin = TPR.TargetPointer;
-    if (!TPR.isPresent() && !TPR.isHostPointer() &&
-        (DataSize || HasPresentModifier)) {
-      DP("Mapping does not exist (%s)\n",
-         (HasPresentModifier ? "'present' map type modifier" : "ignored"));
-      if (HasPresentModifier) {
-        // OpenMP 5.1, sec. 2.21.7.1 "map Clause", p. 350 L10-13:
-        // "If a map clause appears on a target, target data, target enter data
-        // or target exit data construct with a present map-type-modifier then
-        // on entry to the region if the corresponding list item does not appear
-        // in the device data environment then an error occurs and the program
-        // terminates."
-        //
-        // This should be an error upon entering an "omp target exit data".  It
-        // should not be an error upon exiting an "omp target data" or "omp
-        // target".  For "omp target data", Clang thus doesn't include present
-        // modifiers for end calls.  For "omp target", we have not found a valid
-        // OpenMP program for which the error matters: it appears that, if a
-        // program can guarantee that data is present at the beginning of an
-        // "omp target" region so that there's no error there, that data is also
-        // guaranteed to be present at the end.
-        MESSAGE("device mapping required by 'present' map type modifier does "
-                "not exist for host address " DPxMOD " (%" PRId64 " bytes)",
-                DPxPTR(HstPtrBegin), DataSize);
-        return OFFLOAD_FAIL;
-      }
-    } else {
-      DP("There are %" PRId64 " bytes allocated at target address " DPxMOD
-         " - is%s last\n",
-         DataSize, DPxPTR(TgtPtrBegin), (TPR.Flags.IsLast ? "" : " not"));
-    }
 
-    // OpenMP 5.1, sec. 2.21.7.1 "map Clause", p. 351 L14-16:
-    // "If the map clause appears on a target, target data, or target exit data
-    // construct and a corresponding list item of the original list item is not
-    // present in the device data environment on exit from the region then the
-    // list item is ignored."
-    if (!TPR.isPresent())
-      continue;
+    // Report if HstPtrBegin matches the State HstPtrBegin:
+    bool HostPointerMismatch = TPR.getEntry()->HstPtrBegin != (uintptr_t)HstPtrBegin;
+    if (HostPointerMismatch)
+      REPORT("current HstPtrBegin " DPxMOD " does not match entry HstPtrBegin " DPxMOD ".\n", DPxPTR(HstPtrBegin), DPxPTR(TPR.getEntry()->HstPtrBegin));
 
-    // Move data back to the host
-    const bool HasAlways = ArgTypes[I] & OMP_TGT_MAPTYPE_ALWAYS;
-    const bool HasFrom = ArgTypes[I] & OMP_TGT_MAPTYPE_FROM;
-    if (HasFrom && (HasAlways || TPR.Flags.IsLast) &&
-        !TPR.Flags.IsHostPointer && DataSize != 0) {
-      DP("Moving %" PRId64 " bytes (tgt:" DPxMOD ") -> (hst:" DPxMOD ")\n",
-         DataSize, DPxPTR(TgtPtrBegin), DPxPTR(HstPtrBegin));
-
-      // Wait for any previous transfer if an event is present.
-      if (void *Event = TPR.getEntry()->getEvent()) {
-        if (Device.waitEvent(Event, AsyncInfo) != OFFLOAD_SUCCESS) {
-          REPORT("Failed to wait for event " DPxMOD ".\n", DPxPTR(Event));
+    if (!TPR.isHostPointer()) {
+      if (!TPR.isPresent() && (DataSize || HasPresentModifier)) {
+        DP("Mapping does not exist (%s)\n",
+          (HasPresentModifier ? "'present' map type modifier" : "ignored"));
+        if (HasPresentModifier) {
+          // OpenMP 5.1, sec. 2.21.7.1 "map Clause", p. 350 L10-13:
+          // "If a map clause appears on a target, target data, target enter data
+          // or target exit data construct with a present map-type-modifier then
+          // on entry to the region if the corresponding list item does not appear
+          // in the device data environment then an error occurs and the program
+          // terminates."
+          //
+          // This should be an error upon entering an "omp target exit data".  It
+          // should not be an error upon exiting an "omp target data" or "omp
+          // target".  For "omp target data", Clang thus doesn't include present
+          // modifiers for end calls.  For "omp target", we have not found a valid
+          // OpenMP program for which the error matters: it appears that, if a
+          // program can guarantee that data is present at the beginning of an
+          // "omp target" region so that there's no error there, that data is also
+          // guaranteed to be present at the end.
+          MESSAGE("device mapping required by 'present' map type modifier does "
+                  "not exist for host address " DPxMOD " (%" PRId64 " bytes)",
+                  DPxPTR(HstPtrBegin), DataSize);
           return OFFLOAD_FAIL;
         }
+      } else {
+        DP("There are %" PRId64 " bytes allocated at target address " DPxMOD
+          " - is%s last\n",
+          DataSize, DPxPTR(TgtPtrBegin), (TPR.Flags.IsLast ? "" : " not"));
       }
+      // printf("targetDataEnd: after COND 3\n");
 
-      Ret = Device.retrieveData(HstPtrBegin, TgtPtrBegin, DataSize, AsyncInfo,
-                                TPR.getEntry());
-      if (Ret != OFFLOAD_SUCCESS) {
-        REPORT("Copying data from device failed.\n");
-        return OFFLOAD_FAIL;
-      }
+      // OpenMP 5.1, sec. 2.21.7.1 "map Clause", p. 351 L14-16:
+      // "If the map clause appears on a target, target data, or target exit data
+      // construct and a corresponding list item of the original list item is not
+      // present in the device data environment on exit from the region then the
+      // list item is ignored."
+      if (!TPR.isPresent())
+        continue;
+      // printf("targetDataEnd: after COND 4\n");
 
-      // As we are expecting to delete the entry the d2h copy might race
-      // with another one that also tries to delete the entry. This happens
-      // as the entry can be reused and the reuse might happen after the
-      // copy-back was issued but before it completed. Since the reuse might
-      // also copy-back a value we would race.
-      if (TPR.Flags.IsLast) {
-        if (TPR.getEntry()->addEventIfNecessary(Device, AsyncInfo) !=
-            OFFLOAD_SUCCESS)
+      // Move data back to the host
+      const bool HasAlways = ArgTypes[I] & OMP_TGT_MAPTYPE_ALWAYS;
+      const bool HasFrom = ArgTypes[I] & OMP_TGT_MAPTYPE_FROM;
+      if (HasFrom && (HasAlways || TPR.Flags.IsLast) && DataSize != 0) {
+        DP("Moving %" PRId64 " bytes (tgt:" DPxMOD ") -> (hst:" DPxMOD ")\n",
+          DataSize, DPxPTR(TgtPtrBegin), DPxPTR(HstPtrBegin));
+
+        // Wait for any previous transfer if an event is present.
+        if (void *Event = TPR.getEntry()->getEvent()) {
+          if (Device.waitEvent(Event, AsyncInfo) != OFFLOAD_SUCCESS) {
+            REPORT("Failed to wait for event " DPxMOD ".\n", DPxPTR(Event));
+            return OFFLOAD_FAIL;
+          }
+        }
+
+        Ret = Device.retrieveData(HstPtrBegin, TgtPtrBegin, DataSize, AsyncInfo,
+                                  TPR.getEntry());
+        if (Ret != OFFLOAD_SUCCESS) {
+          REPORT("Copying data from device failed.\n");
           return OFFLOAD_FAIL;
+        }
+
+        // As we are expecting to delete the entry the d2h copy might race
+        // with another one that also tries to delete the entry. This happens
+        // as the entry can be reused and the reuse might happen after the
+        // copy-back was issued but before it completed. Since the reuse might
+        // also copy-back a value we would race.
+        if (TPR.Flags.IsLast) {
+          if (TPR.getEntry()->addEventIfNecessary(Device, AsyncInfo) !=
+              OFFLOAD_SUCCESS)
+            return OFFLOAD_FAIL;
+        }
       }
+      // printf("targetDataEnd: after COND 4\n");
+    } else {
+      // Some zero-sized arrays are not mapped or added to the mapping table so they
+      // do not need to be removed. These arrays are not part of the current entry.
+      if (DataSize == 0 && !TPR.isPresent() && HostPointerMismatch)
+        continue;
     }
+
+    // printf("Add entry to list to be postprocessed %p Size = %d\n", HstPtrBegin, DataSize);
 
     // Add pointer to the buffer for post-synchronize processing.
     PostProcessingPtrs->emplace_back(HstPtrBegin, DataSize, ArgTypes[I],

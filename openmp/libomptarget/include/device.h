@@ -159,9 +159,13 @@ public:
 
   /// Functions that manages the number of threads referencing the entry in a
   /// targetDataEnd.
-  void incDataEndThreadCount() { ++States->DataEndThreadCount; }
+  void incDataEndThreadCount() {
+    // printf(" =====>>>>> incDataEndThreadCount for %p: States->DataEndThreadCount = %d\n", HstPtrBegin, States->DataEndThreadCount);
+    ++States->DataEndThreadCount;
+  }
 
   [[nodiscard]] int32_t decDataEndThreadCount() {
+    // printf(" =====>>>>> decDataEndThreadCount for %p: States->DataEndThreadCount = %d\n", HstPtrBegin, States->DataEndThreadCount);
     return --States->DataEndThreadCount;
   }
 
