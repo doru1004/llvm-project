@@ -448,40 +448,57 @@ template <typename T, typename ST> struct omptarget_nvptx_LoopSupport {
 //       an DST pointer which can then be allocated properly without malloc.
 // static DynamicScheduleTracker *THREAD_LOCAL(ThreadDSTPtr);
 
+// class DynamicScheduleTLS {
+// private:
+//   static constexpr long MAX_THREADS = 1024;
+//   static inline DynamicScheduleTracker *storage[MAX_THREADS];
+
+// public:
+//   inline void set(int32_t gtid, DynamicScheduleTracker *value) {
+//     storage[gtid] = value;
+//   }
+
+//   inline DynamicScheduleTracker *get(int32_t gtid) {
+//     return storage[gtid];
+//   }
+// };
+
 class DynamicScheduleTLS {
 private:
-  static constexpr long MAX_THREADS = 1024;
-  static inline DynamicScheduleTracker *storage[MAX_THREADS];
+  static inline DynamicScheduleTracker * storage = static_cast<DynamicScheduleTracker *>(
+      memory::allocGlobal(omp_get_num_teams() * omp_get_num_threads() * sizeof(DynamicScheduleTracker), "new DST[]"));
 
 public:
-  inline void set(int32_t gtid, DynamicScheduleTracker *value) {
-    storage[gtid] = value;
+  inline void set(DynamicScheduleTracker *value) {
+    long gtid = omp_get_team_num() * omp_get_num_threads() + omp_get_thread_num();
+    storage[gtid] = *value;
   }
 
-  inline DynamicScheduleTracker *get(int32_t gtid) {
-    return storage[gtid];
+  inline DynamicScheduleTracker *get() {
+    long gtid = omp_get_team_num() * omp_get_num_threads() + omp_get_thread_num();
+    return &storage[gtid];
   }
 };
 static DynamicScheduleTLS ThreadDSTPtr;
 
 // Create a new DST, link the current one, and define the new as current.
-static DynamicScheduleTracker *pushDST(int32_t gtid) {
+static DynamicScheduleTracker *pushDST() {
   DynamicScheduleTracker *NewDST = static_cast<DynamicScheduleTracker *>(
       memory::allocGlobal(sizeof(DynamicScheduleTracker), "new DST"));
   *NewDST = DynamicScheduleTracker({0});
-  NewDST->NextDST = ThreadDSTPtr.get(gtid);
-  ThreadDSTPtr.set(gtid, NewDST);
+  NewDST->NextDST = ThreadDSTPtr.get();
+  ThreadDSTPtr.set(NewDST);
   return NewDST;
 }
 
 // Return the current DST.
-static DynamicScheduleTracker *peekDST(int32_t gtid) { return ThreadDSTPtr.get(gtid); }
+static DynamicScheduleTracker *peekDST() { return ThreadDSTPtr.get(); }
 
 // Pop the current DST and restore the last one.
-static void popDST(int32_t gtid) {
-  DynamicScheduleTracker *OldDST = ThreadDSTPtr.get(gtid)->NextDST;
-  memory::freeGlobal(ThreadDSTPtr.get(gtid), "remove DST");
-  ThreadDSTPtr.set(gtid, OldDST);
+static void popDST() {
+  DynamicScheduleTracker *OldDST = ThreadDSTPtr.get()->NextDST;
+  memory::freeGlobal(ThreadDSTPtr.get(), "remove DST");
+  ThreadDSTPtr.set(OldDST);
 }
 
 extern "C" {
@@ -489,7 +506,7 @@ extern "C" {
 // init
 void __kmpc_dispatch_init_4(IdentTy *loc, int32_t tid, int32_t schedule,
                             int32_t lb, int32_t ub, int32_t st, int32_t chunk) {
-  DynamicScheduleTracker *DST = pushDST(mapping::getThreadIdInBlock());
+  DynamicScheduleTracker *DST = pushDST();
   omptarget_nvptx_LoopSupport<int32_t, int32_t>::dispatch_init(
       loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk, DST);
 }
@@ -497,14 +514,14 @@ void __kmpc_dispatch_init_4(IdentTy *loc, int32_t tid, int32_t schedule,
 void __kmpc_dispatch_init_4u(IdentTy *loc, int32_t tid, int32_t schedule,
                              uint32_t lb, uint32_t ub, int32_t st,
                              int32_t chunk) {
-  DynamicScheduleTracker *DST = pushDST(mapping::getThreadIdInBlock());
+  DynamicScheduleTracker *DST = pushDST();
   omptarget_nvptx_LoopSupport<uint32_t, int32_t>::dispatch_init(
       loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk, DST);
 }
 
 void __kmpc_dispatch_init_8(IdentTy *loc, int32_t tid, int32_t schedule,
                             int64_t lb, int64_t ub, int64_t st, int64_t chunk) {
-  DynamicScheduleTracker *DST = pushDST(mapping::getThreadIdInBlock());
+  DynamicScheduleTracker *DST = pushDST();
   omptarget_nvptx_LoopSupport<int64_t, int64_t>::dispatch_init(
       loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk, DST);
 }
@@ -512,7 +529,7 @@ void __kmpc_dispatch_init_8(IdentTy *loc, int32_t tid, int32_t schedule,
 void __kmpc_dispatch_init_8u(IdentTy *loc, int32_t tid, int32_t schedule,
                              uint64_t lb, uint64_t ub, int64_t st,
                              int64_t chunk) {
-  DynamicScheduleTracker *DST = pushDST(mapping::getThreadIdInBlock());
+  DynamicScheduleTracker *DST = pushDST();
   omptarget_nvptx_LoopSupport<uint64_t, int64_t>::dispatch_init(
       loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk, DST);
 }
@@ -520,28 +537,28 @@ void __kmpc_dispatch_init_8u(IdentTy *loc, int32_t tid, int32_t schedule,
 // next
 int __kmpc_dispatch_next_4(IdentTy *loc, int32_t tid, int32_t *p_last,
                            int32_t *p_lb, int32_t *p_ub, int32_t *p_st) {
-  DynamicScheduleTracker *DST = peekDST(mapping::getThreadIdInBlock());
+  DynamicScheduleTracker *DST = peekDST();
   return omptarget_nvptx_LoopSupport<int32_t, int32_t>::dispatch_next(
       loc, tid, p_last, p_lb, p_ub, p_st, DST);
 }
 
 int __kmpc_dispatch_next_4u(IdentTy *loc, int32_t tid, int32_t *p_last,
                             uint32_t *p_lb, uint32_t *p_ub, int32_t *p_st) {
-  DynamicScheduleTracker *DST = peekDST(mapping::getThreadIdInBlock());
+  DynamicScheduleTracker *DST = peekDST();
   return omptarget_nvptx_LoopSupport<uint32_t, int32_t>::dispatch_next(
       loc, tid, p_last, p_lb, p_ub, p_st, DST);
 }
 
 int __kmpc_dispatch_next_8(IdentTy *loc, int32_t tid, int32_t *p_last,
                            int64_t *p_lb, int64_t *p_ub, int64_t *p_st) {
-  DynamicScheduleTracker *DST = peekDST(mapping::getThreadIdInBlock());
+  DynamicScheduleTracker *DST = peekDST();
   return omptarget_nvptx_LoopSupport<int64_t, int64_t>::dispatch_next(
       loc, tid, p_last, p_lb, p_ub, p_st, DST);
 }
 
 int __kmpc_dispatch_next_8u(IdentTy *loc, int32_t tid, int32_t *p_last,
                             uint64_t *p_lb, uint64_t *p_ub, int64_t *p_st) {
-  DynamicScheduleTracker *DST = peekDST(mapping::getThreadIdInBlock());
+  DynamicScheduleTracker *DST = peekDST();
   return omptarget_nvptx_LoopSupport<uint64_t, int64_t>::dispatch_next(
       loc, tid, p_last, p_lb, p_ub, p_st, DST);
 }
@@ -549,22 +566,22 @@ int __kmpc_dispatch_next_8u(IdentTy *loc, int32_t tid, int32_t *p_last,
 // fini
 void __kmpc_dispatch_fini_4(IdentTy *loc, int32_t tid) {
   omptarget_nvptx_LoopSupport<int32_t, int32_t>::dispatch_fini();
-  popDST(mapping::getThreadIdInBlock());
+  popDST();
 }
 
 void __kmpc_dispatch_fini_4u(IdentTy *loc, int32_t tid) {
   omptarget_nvptx_LoopSupport<uint32_t, int32_t>::dispatch_fini();
-  popDST(mapping::getThreadIdInBlock());
+  popDST();
 }
 
 void __kmpc_dispatch_fini_8(IdentTy *loc, int32_t tid) {
   omptarget_nvptx_LoopSupport<int64_t, int64_t>::dispatch_fini();
-  popDST(mapping::getThreadIdInBlock());
+  popDST();
 }
 
 void __kmpc_dispatch_fini_8u(IdentTy *loc, int32_t tid) {
   omptarget_nvptx_LoopSupport<uint64_t, int64_t>::dispatch_fini();
-  popDST(mapping::getThreadIdInBlock());
+  popDST();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
