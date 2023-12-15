@@ -6811,8 +6811,8 @@ private:
       OpenMPMapClauseKind MapType, ArrayRef<OpenMPMapModifierKind> MapModifiers,
       ArrayRef<OpenMPMotionModifierKind> MotionModifiers,
       OMPClauseMappableExprCommon::MappableExprComponentListRef Components,
-      MapCombinedInfoTy &CombinedInfo, StructRangeInfoTy &PartialStruct,
-      bool IsFirstComponentList, bool IsImplicit,
+      MapCombinedInfoTy &CombinedInfo, MapCombinedInfoTy &StructBaseCombinedInfo, StructRangeInfoTy &PartialStruct,
+      bool IsFirstComponentList, bool IsImplicit, bool GenerateAllInfoForClauses,
       const ValueDecl *Mapper = nullptr, bool ForDeviceAddr = false,
       const ValueDecl *BaseDecl = nullptr, const Expr *MapExpr = nullptr,
       ArrayRef<OMPClauseMappableExprCommon::MappableExprComponentListRef>
@@ -7018,13 +7018,16 @@ private:
     if (isa<MemberExpr>(AssocExpr)) {
       // The base is the 'this' pointer. The content of the pointer is going
       // to be the base of the field being mapped.
+      printf(" BRANCH 1 \n");
       BP = CGF.LoadCXXThisAddress();
     } else if ((AE && isa<CXXThisExpr>(AE->getBase()->IgnoreParenImpCasts())) ||
                (OASE &&
                 isa<CXXThisExpr>(OASE->getBase()->IgnoreParenImpCasts()))) {
+      printf(" BRANCH 2 \n");
       BP = CGF.EmitOMPSharedLValue(AssocExpr).getAddress(CGF);
     } else if (OAShE &&
                isa<CXXThisExpr>(OAShE->getBase()->IgnoreParenCasts())) {
+      printf(" BRANCH 3 \n");
       BP = Address(
           CGF.EmitScalarExpr(OAShE->getBase()),
           CGF.ConvertTypeForMem(OAShE->getBase()->getType()->getPointeeType()),
@@ -7032,6 +7035,7 @@ private:
     } else {
       // The base is the reference to the variable.
       // BP = &Var.
+      printf(" BRANCH 4 \n");
       BP = CGF.EmitOMPSharedLValue(AssocExpr).getAddress(CGF);
       if (const auto *VD =
               dyn_cast_or_null<VarDecl>(I->getAssociatedDeclaration())) {
@@ -7042,6 +7046,7 @@ private:
                 *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&
                CGF.CGM.getOpenMPRuntime().hasRequiresUnifiedSharedMemory())) {
             RequiresReference = true;
+            printf(" BRANCH 4.1 \n");
             BP = CGF.CGM.getOpenMPRuntime().getAddrOfDeclareTargetVar(VD);
           }
         }
@@ -7058,9 +7063,10 @@ private:
         // active or the base declaration is not global variable.
         const auto *VD = dyn_cast<VarDecl>(I->getAssociatedDeclaration());
         if (CGF.CGM.getOpenMPRuntime().hasRequiresUnifiedSharedMemory() ||
-            !VD || VD->hasLocalStorage())
+            !VD || VD->hasLocalStorage()) {
+          printf("Update BP 1\n");
           BP = CGF.EmitLoadOfPointer(BP, Ty->castAs<PointerType>());
-        else
+        } else
           FirstPointerInComplexData = true;
         ++I;
       }
@@ -7097,6 +7103,25 @@ private:
 
     bool IsNonContiguous = CombinedInfo.NonContigInfo.IsNonContiguous;
     bool IsPrevMemberReference = false;
+
+    // We need to check if we will be encountering any MEs. If we do not encounter
+    // any ME expression it means we will be mapping the whole struct. In that
+    // case we need to skip adding an entry for the struct to the CombinedInfo list and
+    // instead add an entry to the StructBaseCombinedInfo list only when generating
+    // all info for clauses.
+    bool IsMappingWholeStruct = true;
+    if (!GenerateAllInfoForClauses) {
+      IsMappingWholeStruct = false;
+    } else {
+      for (auto TempI = I; TempI != CE; ++TempI) {
+        const MemberExpr *PossibleME = dyn_cast<MemberExpr>(TempI->getAssociatedExpression());
+        if (PossibleME) {
+          IsMappingWholeStruct = false;
+          break;
+        }
+      }
+    }
+    printf("---------------> IsMappingWholeStruct = %d\n", IsMappingWholeStruct);
 
     for (; I != CE; ++I) {
       // If the current component is member of a struct (parent struct) mark it.
@@ -7230,6 +7255,7 @@ private:
              (IsPrevMemberReference && !IsPointer) ||
              (IsMemberReference && Next != CE &&
               !Next->getAssociatedExpression()->getType()->isPointerType()));
+        printf("Work on PartialStruct: %d\n", !OverlappedElements.empty() && Next == CE);
         if (!OverlappedElements.empty() && Next == CE) {
           // Handle base element with the info for overlapped elements.
           assert(!PartialStruct.Base.isValid() && "The base element is set.");
@@ -7317,21 +7343,48 @@ private:
           break;
         }
         llvm::Value *Size = getExprTypeSize(I->getAssociatedExpression());
+        Size->dump();
+        printf("CHECK IF WE POPULATE CombinedInfo: %d\n", !IsMemberPointerOrAddr ||
+            (Next == CE && MapType != OMPC_MAP_unknown));
+        printf(" CAN I SKIP ADDING TO COMBINED INFO?? (equiv. with whole struct being mapped) %d\n", !EncounteredME);
+        printf(" IsMappingWholeStruct = %d\n", IsMappingWholeStruct);
+        // Skip adding an entry in the CurInfo of this combined entry if the whole
+        // struct is currently being mapped. The struct needs to be added in the
+        // first position before any data internal to the struct is being mapped.
+        // The whole struct entry needs to be merged with the combined entry in the
+        // emitCombinedEntry method. The whole struct entry will be held in
+        // StructBaseCombinedInfo.
         if (!IsMemberPointerOrAddr ||
             (Next == CE && MapType != OMPC_MAP_unknown)) {
-          CombinedInfo.Exprs.emplace_back(MapDecl, MapExpr);
-          CombinedInfo.BasePointers.push_back(BP.getPointer());
-          CombinedInfo.DevicePtrDecls.push_back(nullptr);
-          CombinedInfo.DevicePointers.push_back(DeviceInfoTy::None);
-          CombinedInfo.Pointers.push_back(LB.getPointer());
-          CombinedInfo.Sizes.push_back(
-              CGF.Builder.CreateIntCast(Size, CGF.Int64Ty, /*isSigned=*/true));
-          CombinedInfo.NonContigInfo.Dims.push_back(IsNonContiguous ? DimSize
-                                                                    : 1);
+          if (!IsMappingWholeStruct) {
+            CombinedInfo.Exprs.emplace_back(MapDecl, MapExpr);
+            CombinedInfo.BasePointers.push_back(BP.getPointer());
+            CombinedInfo.DevicePtrDecls.push_back(nullptr);
+            CombinedInfo.DevicePointers.push_back(DeviceInfoTy::None);
+            CombinedInfo.Pointers.push_back(LB.getPointer());
+            CombinedInfo.Sizes.push_back(
+                CGF.Builder.CreateIntCast(Size, CGF.Int64Ty, /*isSigned=*/true));
+            CombinedInfo.NonContigInfo.Dims.push_back(IsNonContiguous ? DimSize : 1);
+          } else {
+            StructBaseCombinedInfo.Exprs.emplace_back(MapDecl, MapExpr);
+            StructBaseCombinedInfo.BasePointers.push_back(BP.getPointer());
+            StructBaseCombinedInfo.DevicePtrDecls.push_back(nullptr);
+            StructBaseCombinedInfo.DevicePointers.push_back(DeviceInfoTy::None);
+            StructBaseCombinedInfo.Pointers.push_back(LB.getPointer());
+            StructBaseCombinedInfo.Sizes.push_back(
+                CGF.Builder.CreateIntCast(Size, CGF.Int64Ty, /*isSigned=*/true));
+            StructBaseCombinedInfo.NonContigInfo.Dims.push_back(IsNonContiguous ? DimSize : 1);
+          }
+
+          printf("SIZE OF CombinedInfo EXPRS: %d\n",CombinedInfo.Exprs.size());
+          printf("SIZE OF StructBaseCombinedInfo EXPRS: %d\n", StructBaseCombinedInfo.Exprs.size());
 
           // If Mapper is valid, the last component inherits the mapper.
           bool HasMapper = Mapper && Next == CE;
-          CombinedInfo.Mappers.push_back(HasMapper ? Mapper : nullptr);
+          if (!IsMappingWholeStruct)
+            CombinedInfo.Mappers.push_back(HasMapper ? Mapper : nullptr);
+          else
+            StructBaseCombinedInfo.Mappers.push_back(HasMapper ? Mapper : nullptr);
 
           // We need to add a pointer flag for each map that comes from the
           // same expression except for the first one. We also need to signal
@@ -7363,13 +7416,21 @@ private:
             }
           }
 
-          CombinedInfo.Types.push_back(Flags);
+          printf("          The type of the added component is Falgs = %d\n", Flags);
+          // printf("          The type of the added component is:\n");
+          printf("                     OMP_MAP_TO: %d\n", Flags & OpenMPOffloadMappingFlags::OMP_MAP_TO);
+          printf("              OMP_MAP_MEMBER_OF: %d\n", Flags & OpenMPOffloadMappingFlags::OMP_MAP_MEMBER_OF);
+          if (!IsMappingWholeStruct)
+            CombinedInfo.Types.push_back(Flags);
+          else
+            StructBaseCombinedInfo.Types.push_back(Flags);
         }
 
         // If we have encountered a member expression so far, keep track of the
         // mapped member. If the parent is "*this", then the value declaration
         // is nullptr.
         if (EncounteredME) {
+          printf("EncounteredME IS TRUE!!\n");
           const auto *FD = cast<FieldDecl>(EncounteredME->getMemberDecl());
           unsigned FieldIndex = FD->getFieldIndex();
 
@@ -7398,11 +7459,16 @@ private:
               PartialStruct.HighestElem = {FieldIndex, LowestElem};
             }
           }
+        } else {
+          printf("EncounteredME IS FALSE\n");
         }
 
         // Need to emit combined struct for array sections.
         if (IsFinalArraySection || IsNonContiguous)
           PartialStruct.IsArraySection = true;
+        
+        printf("PartialStruct.IsArraySection = %d\n", PartialStruct.IsArraySection);
+        printf("IsFinalArraySection = %d\n", IsFinalArraySection);
 
         // If we have a final array section, we are done with this expression.
         if (IsFinalArraySection)
@@ -7417,6 +7483,7 @@ private:
         FirstPointerInComplexData = false;
         IsPrevMemberReference = IsMemberReference;
       } else if (FirstPointerInComplexData) {
+        printf("FirstPointerInComplexData is TRUE");
         QualType Ty = Components.rbegin()
                           ->getAssociatedDeclaration()
                           ->getType()
@@ -7429,7 +7496,10 @@ private:
     // record.
     if (!EncounteredME)
       PartialStruct.HasCompleteRecord = true;
+    
+    printf("RAN INTO THE WHOLE COMPONENT: %d\n", PartialStruct.HasCompleteRecord);
 
+    printf(" ==========================> EXIT NOW: %d\n", !IsNonContiguous);
     if (!IsNonContiguous)
       return;
 
@@ -7740,6 +7810,7 @@ private:
         };
 
     for (const auto *Cl : Clauses) {
+      printf("Clause ====\n");
       const auto *C = dyn_cast<OMPMapClause>(Cl);
       if (!C)
         continue;
@@ -7752,6 +7823,7 @@ private:
       const auto *EI = C->getVarRefs().begin();
       for (const auto L : C->component_lists()) {
         const Expr *E = (C->getMapLoc().isValid()) ? *EI : nullptr;
+        printf("InfoGen 1\n");
         InfoGen(std::get<0>(L), Kind, std::get<1>(L), C->getMapType(),
                 C->getMapTypeModifiers(), std::nullopt,
                 /*ReturnDevicePointer=*/false, C->isImplicit(), std::get<2>(L),
@@ -7769,6 +7841,7 @@ private:
         Kind = Present;
       const auto *EI = C->getVarRefs().begin();
       for (const auto L : C->component_lists()) {
+        printf("InfoGen 2\n");
         InfoGen(std::get<0>(L), Kind, std::get<1>(L), OMPC_MAP_to, std::nullopt,
                 C->getMotionModifiers(), /*ReturnDevicePointer=*/false,
                 C->isImplicit(), std::get<2>(L), *EI);
@@ -7785,6 +7858,7 @@ private:
         Kind = Present;
       const auto *EI = C->getVarRefs().begin();
       for (const auto L : C->component_lists()) {
+        printf("InfoGen 3\n");
         InfoGen(std::get<0>(L), Kind, std::get<1>(L), OMPC_MAP_from,
                 std::nullopt, C->getMotionModifiers(),
                 /*ReturnDevicePointer=*/false, C->isImplicit(), std::get<2>(L),
@@ -7838,6 +7912,7 @@ private:
             // processed. Nonetheless, generateInfoForComponentList must be
             // called to take the pointer into account for the calculation of
             // the range of the partial struct.
+            printf("InfoGen 4\n");
             InfoGen(nullptr, Other, Components, OMPC_MAP_unknown, std::nullopt,
                     std::nullopt, /*ReturnDevicePointer=*/false, IsImplicit,
                     nullptr, nullptr, IsDevAddr);
@@ -7852,6 +7927,7 @@ private:
             } else {
               Ptr = CGF.EmitLoadOfScalar(CGF.EmitLValue(IE), IE->getExprLoc());
             }
+            printf("UseDeviceDataCombinedInfoGen\n");
             UseDeviceDataCombinedInfoGen(VD, Ptr, CGF, IsDevAddr);
           }
         };
@@ -7953,49 +8029,76 @@ private:
     }
 
     for (const auto &Data : Info) {
+      printf("\n\nInfo ===>\n");
       StructRangeInfoTy PartialStruct;
       // Temporary generated information.
       MapCombinedInfoTy CurInfo;
+      MapCombinedInfoTy StructBaseCurInfo;
       const Decl *D = Data.first;
       const ValueDecl *VD = cast_or_null<ValueDecl>(D);
       for (const auto &M : Data.second) {
         for (const MapInfo &L : M) {
+          printf("M =====> L.MapType = %d\n", L.MapType);
           assert(!L.Components.empty() &&
                  "Not expecting declaration with no component lists.");
 
           // Remember the current base pointer index.
           unsigned CurrentBasePointersIdx = CurInfo.BasePointers.size();
+          unsigned StructBasePointersIdx = StructBaseCurInfo.BasePointers.size();
+          printf("CurrentBasePointersIdx = %d\n", CurInfo.BasePointers.size());
           CurInfo.NonContigInfo.IsNonContiguous =
               L.Components.back().isNonContiguous();
           generateInfoForComponentList(
               L.MapType, L.MapModifiers, L.MotionModifiers, L.Components,
-              CurInfo, PartialStruct, /*IsFirstComponentList=*/false,
-              L.IsImplicit, L.Mapper, L.ForDeviceAddr, VD, L.VarRef);
+              CurInfo, StructBaseCurInfo, PartialStruct, /*IsFirstComponentList=*/false,
+              L.IsImplicit, /*GenerateAllInfoForClauses*/ true, L.Mapper, L.ForDeviceAddr, VD, L.VarRef);
+          
+          // There should only be at most 1 struct base:
+          assert(StructBaseCurInfo.BasePointers.size() < 2 && "More than one base pointer present.");
 
-          // If this entry relates with a device pointer, set the relevant
+          // If the last added entry relates with a device pointer, set the relevant
           // declaration and add the 'return pointer' flag.
           if (L.ReturnDevicePointer) {
-            assert(CurInfo.BasePointers.size() > CurrentBasePointersIdx &&
-                   "Unexpected number of mapped base pointers.");
+            // Check whether a value was added to either CurInfo or StructBaseCurInfo and
+            // error if no value was added to either of them:
+            assert((CurrentBasePointersIdx < CurInfo.BasePointers.size() ||
+                    StructBasePointersIdx < StructBaseCurInfo.BasePointers.size()) &&
+                  "Unexpected number of mapped base pointers.");
 
+            // Choose a base pointer index which is always valid:
             const ValueDecl *RelevantVD =
                 L.Components.back().getAssociatedDeclaration();
             assert(RelevantVD &&
-                   "No relevant declaration related with device pointer??");
+                  "No relevant declaration related with device pointer??");
 
-            CurInfo.DevicePtrDecls[CurrentBasePointersIdx] = RelevantVD;
-            CurInfo.DevicePointers[CurrentBasePointersIdx] =
-                L.ForDeviceAddr ? DeviceInfoTy::Address : DeviceInfoTy::Pointer;
-            CurInfo.Types[CurrentBasePointersIdx] |=
-                OpenMPOffloadMappingFlags::OMP_MAP_RETURN_PARAM;
+            // If StructBaseCurInfo has been updated this time then work on its last entry instead
+            // of the last entry in CurInfo:
+            if (StructBasePointersIdx < StructBaseCurInfo.BasePointers.size()) {
+              unsigned StructBasePointersIdx = StructBaseCurInfo.BasePointers.size() - 1;
+              StructBaseCurInfo.DevicePtrDecls[StructBasePointersIdx] = RelevantVD;
+              StructBaseCurInfo.DevicePointers[StructBasePointersIdx] =
+                  L.ForDeviceAddr ? DeviceInfoTy::Address : DeviceInfoTy::Pointer;
+              StructBaseCurInfo.Types[StructBasePointersIdx] |=
+                  OpenMPOffloadMappingFlags::OMP_MAP_RETURN_PARAM;
+            } else {
+              unsigned CurrentBasePointersIdx = CurInfo.BasePointers.size() - 1;
+              CurInfo.DevicePtrDecls[CurrentBasePointersIdx] = RelevantVD;
+              CurInfo.DevicePointers[CurrentBasePointersIdx] =
+                  L.ForDeviceAddr ? DeviceInfoTy::Address : DeviceInfoTy::Pointer;
+              CurInfo.Types[CurrentBasePointersIdx] |=
+                  OpenMPOffloadMappingFlags::OMP_MAP_RETURN_PARAM;
+            }
           }
         }
       }
+
+      printf("=================================== DONE WITH FIRST LOOP NEST! ===================================\n");
 
       // Append any pending zero-length pointers which are struct members and
       // used with use_device_ptr or use_device_addr.
       auto CI = DeferredInfo.find(Data.first);
       if (CI != DeferredInfo.end()) {
+        printf("BLAAAA!\n");
         for (const DeferredDevicePtrEntryTy &L : CI->second) {
           llvm::Value *BasePtr;
           llvm::Value *Ptr;
@@ -8034,17 +8137,44 @@ private:
           CurInfo.Mappers.push_back(nullptr);
         }
       }
+
+      // Unify entries in one list making sure the struct mapping precedes the individual fields:
+      MapCombinedInfoTy UnionCurInfo;
+      UnionCurInfo.append(StructBaseCurInfo);
+      UnionCurInfo.append(CurInfo);
+
       // If there is an entry in PartialStruct it means we have a struct with
       // individual members mapped. Emit an extra combined entry.
       if (PartialStruct.Base.isValid()) {
         CurInfo.NonContigInfo.Dims.push_back(0);
-        emitCombinedEntry(CombinedInfo, CurInfo.Types, PartialStruct,
+        printf("EMIT COMBINED ENTRY 1\n");
+        // If there is no individually mapped struct then we have to emit a
+        // combined entry. If an indiviual mapping for the struct exists then use that to
+        // replace the entry.
+        // if (StructBaseCurInfo.BasePointers.size() == 0)
+        //   emitCombinedEntry(CombinedInfo, CurInfo.Types, PartialStruct,
+        //                     /*IsMapThis*/ !VD, OMPBuilder, VD);
+        // else
+        //   emitStructBaseAsCombinedEntry(CombinedInfo, StructBaseCurInfo, CurInfo.Types, PartialStruct, OMPBuilder);
+
+        // MISSING MEMBER OF:
+        // omptarget --> Entry  0: Base=0x00007ffc37ad4ff8, Begin=0x00007ffc37ad4ff8, Size=288, Type=0x0, Name=unknown
+        // omptarget --> Entry  1: Base=0x00007ffc37ad4ff8, Begin=0x00007ffc37ad4ff8, Size=288, Type=0x1000000000001, Name=unknown
+        // omptarget --> Entry  2: Base=0x00007ffc37ad4ff8, Begin=0x000055ecbff66cd0, Size=40, Type=0x1000000000011, Name=unknown
+        // omptarget --> Entry  3: Base=0x00007ffc37ad5008, Begin=0x000055ecbff66d00, Size=80, Type=0x1000000000011, Name=unknown
+        emitCombinedEntry(CombinedInfo, UnionCurInfo.Types, PartialStruct,
                           /*IsMapThis*/ !VD, OMPBuilder, VD);
       }
+      // else if (StructBaseCurInfo.BasePointers.size() > 0) {
+      //   // If we are mapping the whole struct add this entry to CombinedInfo.
+      //   CombinedInfo.append(StructBaseCurInfo);
+      // }
+
+      printf("=================================== DONE WITH emitCombinedEntry! ===================================\n");
 
       // We need to append the results of this capture to what we already
       // have.
-      CombinedInfo.append(CurInfo);
+      CombinedInfo.append(UnionCurInfo);
     }
     // Append data for use_device_ptr clauses.
     CombinedInfo.append(UseDeviceDataCombinedInfo);
@@ -8099,6 +8229,56 @@ public:
   /// Constructor for the declare mapper directive.
   MappableExprsHandler(const OMPDeclareMapperDecl &Dir, CodeGenFunction &CGF)
       : CurDir(&Dir), CGF(CGF) {}
+  
+  /// Function that returns true if a list of types only contains a single entry
+  /// that is a mapped struct base.
+  static bool isOnlyMappedStruct(MapFlagsArrayTy &Types,
+                                 const StructRangeInfoTy &PartialStruct) {
+    return Types.size() == 1 &&
+           ((Types.back() & OpenMPOffloadMappingFlags::OMP_MAP_MEMBER_OF) !=
+            OpenMPOffloadMappingFlags::OMP_MAP_MEMBER_OF) &&
+           !PartialStruct.IsArraySection;
+  }
+
+  /// Set flags for when a combined entry is generated including a merged
+  /// combined entry:
+  void emitCombinedEntryFlags(MapCombinedInfoTy &CombinedInfo,
+                              MapFlagsArrayTy &CurTypes,
+                              llvm::OpenMPIRBuilder &OMPBuilder) const {
+    // If any element has the present modifier, then make sure the runtime
+    // doesn't attempt to allocate the struct.
+    if (CurTypes.end() !=
+        llvm::find_if(CurTypes, [](OpenMPOffloadMappingFlags Type) {
+          return static_cast<std::underlying_type_t<OpenMPOffloadMappingFlags>>(
+              Type & OpenMPOffloadMappingFlags::OMP_MAP_PRESENT);
+        }))
+      CombinedInfo.Types.back() |= OpenMPOffloadMappingFlags::OMP_MAP_PRESENT;
+    // Remove TARGET_PARAM flag from the first element
+    (*CurTypes.begin()) &= ~OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
+    // If any element has the ompx_hold modifier, then make sure the runtime
+    // uses the hold reference count for the struct as a whole so that it won't
+    // be unmapped by an extra dynamic reference count decrement.  Add it to all
+    // elements as well so the runtime knows which reference count to check
+    // when determining whether it's time for device-to-host transfers of
+    // individual elements.
+    if (CurTypes.end() !=
+        llvm::find_if(CurTypes, [](OpenMPOffloadMappingFlags Type) {
+          return static_cast<std::underlying_type_t<OpenMPOffloadMappingFlags>>(
+              Type & OpenMPOffloadMappingFlags::OMP_MAP_OMPX_HOLD);
+        })) {
+      CombinedInfo.Types.back() |= OpenMPOffloadMappingFlags::OMP_MAP_OMPX_HOLD;
+      for (auto &M : CurTypes)
+        M |= OpenMPOffloadMappingFlags::OMP_MAP_OMPX_HOLD;
+    }
+
+    // All other current entries will be MEMBER_OF the combined entry
+    // (except for PTR_AND_OBJ entries which do not have a placeholder value
+    // 0xFFFF in the MEMBER_OF field).
+    OpenMPOffloadMappingFlags MemberOfFlag =
+        OMPBuilder.getMemberOfFlag(CombinedInfo.BasePointers.size() - 1);
+    for (auto &M : CurTypes)
+      OMPBuilder.setCorrectMemberOfFlag(M, MemberOfFlag);
+  }
 
   /// Generate code for the combined entry if we have a partially mapped struct
   /// and take care of the mapping flags of the arguments corresponding to
@@ -8109,10 +8289,7 @@ public:
                          llvm::OpenMPIRBuilder &OMPBuilder,
                          const ValueDecl *VD = nullptr,
                          bool NotTargetParams = true) const {
-    if (CurTypes.size() == 1 &&
-        ((CurTypes.back() & OpenMPOffloadMappingFlags::OMP_MAP_MEMBER_OF) !=
-         OpenMPOffloadMappingFlags::OMP_MAP_MEMBER_OF) &&
-        !PartialStruct.IsArraySection)
+    if (isOnlyMappedStruct(CurTypes, PartialStruct))
       return;
     Address LBAddr = PartialStruct.LowestElem.second;
     Address HBAddr = PartialStruct.HighestElem.second;
@@ -8164,39 +8341,35 @@ public:
     CombinedInfo.Types.push_back(
         NotTargetParams ? OpenMPOffloadMappingFlags::OMP_MAP_NONE
                         : OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM);
-    // If any element has the present modifier, then make sure the runtime
-    // doesn't attempt to allocate the struct.
-    if (CurTypes.end() !=
-        llvm::find_if(CurTypes, [](OpenMPOffloadMappingFlags Type) {
+    emitCombinedEntryFlags(CombinedInfo, CurTypes, OMPBuilder);
+  }
+
+  /// Generate code for the combined entry if we have a partially mapped struct
+  /// and take care of the mapping flags of the arguments corresponding to
+  /// individual struct members.
+  void emitStructBaseAsCombinedEntry(MapCombinedInfoTy &CombinedInfo,
+                         MapCombinedInfoTy &StructBaseCurInfo,
+                         MapFlagsArrayTy &CurTypes,
+                         const StructRangeInfoTy &PartialStruct,
+                         llvm::OpenMPIRBuilder &OMPBuilder) const {
+    CombinedInfo.append(StructBaseCurInfo);
+
+    // If only the struct base is mapped then we can just exit immediately, there
+    // is no need to add a combined entry to CombinedInfo for this partial struct.
+    // The StructBaseCurInfo can be added as is to CombinedInfo.
+    if (StructBaseCurInfo.BasePointers.size() > 0 && CurTypes.size() == 0 &&
+        isOnlyMappedStruct(StructBaseCurInfo.Types, PartialStruct)) {
+      return;
+    }
+
+    if (StructBaseCurInfo.Types.end() !=
+        llvm::find_if(StructBaseCurInfo.Types, [](OpenMPOffloadMappingFlags Type) {
           return static_cast<std::underlying_type_t<OpenMPOffloadMappingFlags>>(
               Type & OpenMPOffloadMappingFlags::OMP_MAP_PRESENT);
         }))
       CombinedInfo.Types.back() |= OpenMPOffloadMappingFlags::OMP_MAP_PRESENT;
-    // Remove TARGET_PARAM flag from the first element
-    (*CurTypes.begin()) &= ~OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
-    // If any element has the ompx_hold modifier, then make sure the runtime
-    // uses the hold reference count for the struct as a whole so that it won't
-    // be unmapped by an extra dynamic reference count decrement.  Add it to all
-    // elements as well so the runtime knows which reference count to check
-    // when determining whether it's time for device-to-host transfers of
-    // individual elements.
-    if (CurTypes.end() !=
-        llvm::find_if(CurTypes, [](OpenMPOffloadMappingFlags Type) {
-          return static_cast<std::underlying_type_t<OpenMPOffloadMappingFlags>>(
-              Type & OpenMPOffloadMappingFlags::OMP_MAP_OMPX_HOLD);
-        })) {
-      CombinedInfo.Types.back() |= OpenMPOffloadMappingFlags::OMP_MAP_OMPX_HOLD;
-      for (auto &M : CurTypes)
-        M |= OpenMPOffloadMappingFlags::OMP_MAP_OMPX_HOLD;
-    }
 
-    // All other current entries will be MEMBER_OF the combined entry
-    // (except for PTR_AND_OBJ entries which do not have a placeholder value
-    // 0xFFFF in the MEMBER_OF field).
-    OpenMPOffloadMappingFlags MemberOfFlag =
-        OMPBuilder.getMemberOfFlag(CombinedInfo.BasePointers.size() - 1);
-    for (auto &M : CurTypes)
-      OMPBuilder.setCorrectMemberOfFlag(M, MemberOfFlag);
+    emitCombinedEntryFlags(CombinedInfo, CurTypes, OMPBuilder);
   }
 
   /// Generate all the base pointers, section pointers, sizes, map types, and
@@ -8554,6 +8727,7 @@ public:
     // Associated with a capture, because the mapping flags depend on it.
     // Go through all of the elements with the overlapped elements.
     bool IsFirstComponentList = true;
+    MapCombinedInfoTy StructBaseCombinedInfo;
     for (const auto &Pair : OverlappedData) {
       const MapData &L = *Pair.getFirst();
       OMPClauseMappableExprCommon::MappableExprComponentListRef Components;
@@ -8567,8 +8741,8 @@ public:
       ArrayRef<OMPClauseMappableExprCommon::MappableExprComponentListRef>
           OverlappedComponents = Pair.getSecond();
       generateInfoForComponentList(
-          MapType, MapModifiers, std::nullopt, Components, CombinedInfo,
-          PartialStruct, IsFirstComponentList, IsImplicit, Mapper,
+          MapType, MapModifiers, std::nullopt, Components, CombinedInfo, StructBaseCombinedInfo,
+          PartialStruct, IsFirstComponentList, IsImplicit, /*GenerateAllInfoForClauses*/ false, Mapper,
           /*ForDeviceAddr=*/false, VD, VarRef, OverlappedComponents);
       IsFirstComponentList = false;
     }
@@ -8585,8 +8759,8 @@ public:
       auto It = OverlappedData.find(&L);
       if (It == OverlappedData.end())
         generateInfoForComponentList(MapType, MapModifiers, std::nullopt,
-                                     Components, CombinedInfo, PartialStruct,
-                                     IsFirstComponentList, IsImplicit, Mapper,
+                                     Components, CombinedInfo, StructBaseCombinedInfo, PartialStruct,
+                                     IsFirstComponentList, IsImplicit, /*GenerateAllInfoForClauses*/ false, Mapper,
                                      /*ForDeviceAddr=*/false, VD, VarRef);
       IsFirstComponentList = false;
     }
@@ -9407,8 +9581,10 @@ static void emitTargetCallKernelLaunch(
 
     // If there is an entry in PartialStruct it means we have a struct with
     // individual members mapped. Emit an extra combined entry.
+    printf("\n\n IN KERNEL LAUNCH: PartialStruct.Base.isValid() = %d\n", PartialStruct.Base.isValid());
     if (PartialStruct.Base.isValid()) {
       CombinedInfo.append(PartialStruct.PreliminaryMapData);
+      printf("EMIT COMBINED ENTRY 2\n");
       MEHandler.emitCombinedEntry(
           CombinedInfo, CurInfo.Types, PartialStruct, CI->capturesThis(),
           OMPBuilder, nullptr,
