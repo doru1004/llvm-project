@@ -1,4 +1,4 @@
-
+// clang-format off
 // RUN: %libomptarget-compilexx-generic
 // RUN: env HSA_XNACK=1 LIBOMPTARGET_INFO=30 %libomptarget-run-generic 2>&1 \
 // RUN: | %fcheck-generic -check-prefix=INFO_ZERO -check-prefix=CHECK
@@ -10,6 +10,7 @@
 // RUN: %libomptarget-compilexx-generic
 // RUN: env HSA_XNACK=0 LIBOMPTARGET_INFO=30 %libomptarget-run-generic 2>&1 \
 // RUN: | %fcheck-generic -check-prefix=INFO_COPY -check-prefix=CHECK
+// clang-format on
 
 // UNSUPPORTED: aarch64-unknown-linux-gnu
 // UNSUPPORTED: aarch64-unknown-linux-gnu-LTO
@@ -34,7 +35,7 @@ int main() {
 
   for (int i = 0; i < n; i++)
     b[i] = i;
-
+    // clang-format off
   // INFO_ZERO: Return HstPtrBegin 0x{{.*}} Size=4096 for unified shared memory
   // INFO_ZERO: Return HstPtrBegin 0x{{.*}} Size=4096 for unified shared memory
 
@@ -42,6 +43,7 @@ int main() {
   // INFO_COPY: Creating new map entry with HstPtrBase=0x{{.*}}, HstPtrBegin=0x{{.*}}, TgtAllocBegin=0x{{.*}}, TgtPtrBegin=0x{{.*}}, Size=4096,
   // INFO_COPY: Mapping exists with HstPtrBegin=0x{{.*}}, TgtPtrBegin=0x{{.*}}, Size=4096, DynRefCount=1 (update suppressed)
   // INFO_COPY: Mapping exists with HstPtrBegin=0x{{.*}}, TgtPtrBegin=0x{{.*}}, Size=4096, DynRefCount=1 (update suppressed)
+// clang-format on
 #pragma omp target teams distribute parallel for map(tofrom : a[ : n])         \
     map(to : b[ : n])
   for (int i = 0; i < n; i++)
