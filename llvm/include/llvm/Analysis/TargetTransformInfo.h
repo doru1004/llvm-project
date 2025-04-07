@@ -1776,6 +1776,10 @@ public:
   /// \return The maximum number of function arguments the target supports.
   unsigned getMaxNumArgs() const;
 
+  /// \return Returns true if vectorizing 4 x i8s into an i32 is possible.
+  /// Currently only used by the SLP vectorizer.
+  bool canVectorizei8s() const;
+
   /// @}
 
 private:
@@ -2166,6 +2170,7 @@ public:
   getVPLegalizationStrategy(const VPIntrinsic &PI) const = 0;
   virtual bool hasArmWideBranch(bool Thumb) const = 0;
   virtual unsigned getMaxNumArgs() const = 0;
+  virtual bool canVectorizei8s() const = 0;
 };
 
 template <typename T>
@@ -2583,6 +2588,7 @@ public:
     return Impl.getMinimumVF(ElemWidth, IsScalable);
   }
   unsigned getMaximumVF(unsigned ElemWidth, unsigned Opcode) const override {
+    printf("in TTI!!! getMaximumVF\n");
     return Impl.getMaximumVF(ElemWidth, Opcode);
   }
   unsigned getStoreMinimumVF(unsigned VF, Type *ScalarMemTy,
@@ -2718,6 +2724,7 @@ public:
                                   TTI::TargetCostKind CostKind,
                                   OperandValueInfo OpInfo,
                                   const Instruction *I) override {
+    printf("  getMemoryOpCost 2\n");
     return Impl.getMemoryOpCost(Opcode, Src, Alignment, AddressSpace, CostKind,
                                 OpInfo, I);
   }
@@ -2930,6 +2937,11 @@ public:
 
   unsigned getMaxNumArgs() const override {
     return Impl.getMaxNumArgs();
+  }
+
+  bool canVectorizei8s() const override {
+    printf("in TTI!!! canVectorizei8s\n");
+    return Impl.canVectorizei8s();
   }
 };
 

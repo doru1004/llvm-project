@@ -1058,6 +1058,7 @@ InstructionCost TargetTransformInfo::getMemoryOpCost(
     const Instruction *I) const {
   assert((I == nullptr || I->getOpcode() == Opcode) &&
          "Opcode should reflect passed instruction.");
+  printf("  ==================== TargetTransformInfo::getMemoryOpCost ===================== 1\n");
   InstructionCost Cost = TTIImpl->getMemoryOpCost(
       Opcode, Src, Alignment, AddressSpace, CostKind, OpInfo, I);
   assert(Cost >= 0 && "TTI should not produce negative costs!");
@@ -1311,6 +1312,10 @@ bool TargetTransformInfo::hasArmWideBranch(bool Thumb) const {
 
 unsigned TargetTransformInfo::getMaxNumArgs() const {
   return TTIImpl->getMaxNumArgs();
+}
+
+bool TargetTransformInfo::canVectorizei8s() const {
+  return TTIImpl->canVectorizei8s();
 }
 
 bool TargetTransformInfo::shouldExpandReduction(const IntrinsicInst *II) const {

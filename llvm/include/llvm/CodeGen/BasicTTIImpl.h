@@ -859,6 +859,7 @@ public:
 
   /// Estimate the cost of type-legalization and the legalized type.
   std::pair<InstructionCost, MVT> getTypeLegalizationCost(Type *Ty) const {
+    printf(" ====> getTypeLegalizationCost <=== 1\n");
     LLVMContext &C = Ty->getContext();
     EVT MTy = getTLI()->getValueType(DL, Ty);
 
@@ -866,27 +867,38 @@ public:
     // We keep legalizing the type until we find a legal kind. We assume that
     // the only operation that costs anything is the split. After splitting
     // we need to handle two types.
+    printf(" ====> getTypeLegalizationCost <=== 2\n");
     while (true) {
       TargetLoweringBase::LegalizeKind LK = getTLI()->getTypeConversion(C, MTy);
 
       if (LK.first == TargetLoweringBase::TypeScalarizeScalableVector) {
+        printf(" ====> getTypeLegalizationCost <=== 2 1\n");
         // Ensure we return a sensible simple VT here, since many callers of
         // this function require it.
         MVT VT = MTy.isSimple() ? MTy.getSimpleVT() : MVT::i64;
         return std::make_pair(InstructionCost::getInvalid(), VT);
       }
 
-      if (LK.first == TargetLoweringBase::TypeLegal)
+      // DORU: This is where you hit if the type is LEGAL!!
+      // i8 is not legal.
+      if (LK.first == TargetLoweringBase::TypeLegal) {
+        printf(" ====> getTypeLegalizationCost <=== 2 2\n");
         return std::make_pair(Cost, MTy.getSimpleVT());
+      }
 
       if (LK.first == TargetLoweringBase::TypeSplitVector ||
-          LK.first == TargetLoweringBase::TypeExpandInteger)
+          LK.first == TargetLoweringBase::TypeExpandInteger) {
+        printf(" ====> getTypeLegalizationCost <=== 2 3\n");
         Cost *= 2;
+      }
 
       // Do not loop with f128 type.
-      if (MTy == LK.second)
+      if (MTy == LK.second) {
+        printf(" ====> getTypeLegalizationCost <=== 2 4\n");
         return std::make_pair(Cost, MTy.getSimpleVT());
+      }
 
+      printf(" ====> getTypeLegalizationCost <=== 2 5\n");
       // Keep legalizing the type.
       MTy = LK.second;
     }
@@ -1333,41 +1345,53 @@ public:
                   unsigned AddressSpace, TTI::TargetCostKind CostKind,
                   TTI::OperandValueInfo OpInfo = {TTI::OK_AnyValue, TTI::OP_None},
                   const Instruction *I = nullptr) {
+    printf("  getMemoryOpCost 3\n");
     assert(!Src->isVoidTy() && "Invalid type");
     // Assume types, such as structs, are expensive.
     if (getTLI()->getValueType(DL, Src,  true) == MVT::Other)
       return 4;
+    printf("  getMemoryOpCost 3 1\n");
+    // DORU: This is again an instance of legalization type being 4 instead of 1
+    // for i8.
     std::pair<InstructionCost, MVT> LT = getTypeLegalizationCost(Src);
 
     // Assuming that all loads of legal types cost 1.
     InstructionCost Cost = LT.first;
+    printf("  getMemoryOpCost 3 2\n");
     if (CostKind != TTI::TCK_RecipThroughput)
       return Cost;
 
     const DataLayout &DL = this->getDataLayout();
+    printf("  getMemoryOpCost 3 3\n");
     if (Src->isVectorTy() &&
         // In practice it's not currently possible to have a change in lane
         // length for extending loads or truncating stores so both types should
         // have the same scalable property.
         TypeSize::isKnownLT(DL.getTypeStoreSizeInBits(Src),
                             LT.second.getSizeInBits())) {
+      printf("  getMemoryOpCost 3 4\n");
       // This is a vector load that legalizes to a larger type than the vector
       // itself. Unless the corresponding extending load or truncating store is
       // legal, then this will scalarize.
       TargetLowering::LegalizeAction LA = TargetLowering::Expand;
       EVT MemVT = getTLI()->getValueType(DL, Src);
-      if (Opcode == Instruction::Store)
+      if (Opcode == Instruction::Store) {
+        printf("  getMemoryOpCost 3 5 1\n");
         LA = getTLI()->getTruncStoreAction(LT.second, MemVT);
-      else
+      } else {
+        printf("  getMemoryOpCost 3 5 2\n");
         LA = getTLI()->getLoadExtAction(ISD::EXTLOAD, LT.second, MemVT);
+      }
 
       if (LA != TargetLowering::Legal && LA != TargetLowering::Custom) {
+        printf("  getMemoryOpCost 3 6\n");
         // This is a vector load/store for some illegal type that is scalarized.
         // We must account for the cost of building or decomposing the vector.
         Cost += getScalarizationOverhead(
             cast<VectorType>(Src), Opcode != Instruction::Store,
             Opcode == Instruction::Store, CostKind);
       }
+      printf("  getMemoryOpCost 3 7\n");
     }
 
     return Cost;
@@ -2409,7 +2433,9 @@ public:
   }
 
   unsigned getNumberOfParts(Type *Tp) {
+    // DORU: Number of parts for i8 should 1 not 4.
     std::pair<InstructionCost, MVT> LT = getTypeLegalizationCost(Tp);
+    printf("-------------- getNumberOfParts: %d\n", LT.first.isValid() ? *LT.first.getValue() : 0);
     return LT.first.isValid() ? *LT.first.getValue() : 0;
   }
 

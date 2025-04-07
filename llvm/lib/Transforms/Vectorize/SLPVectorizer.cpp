@@ -100,6 +100,8 @@
 #include <tuple>
 #include <utility>
 
+#include <iostream>
+
 using namespace llvm;
 using namespace llvm::PatternMatch;
 using namespace slpvectorizer;
@@ -1264,6 +1266,7 @@ public:
   }
 
   unsigned getMaximumVF(unsigned ElemWidth, unsigned Opcode) const {
+    // printf(" getMaximumVF: MaxVFOption.getNumOccurrences() = %d TTI->getMaximumVF(ElemWidth, Opcode) = %d\n", MaxVFOption.getNumOccurrences(), TTI->getMaximumVF(ElemWidth, Opcode));
     unsigned MaxVF = MaxVFOption.getNumOccurrences() ?
       MaxVFOption : TTI->getMaximumVF(ElemWidth, Opcode);
     return MaxVF ? MaxVF : UINT_MAX;
@@ -9185,9 +9188,11 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
         }
 
         InstructionCost VecCost = VectorCost(CommonCost);
+        dbgs() << "SLP:     BEFORE !!!! VecCost = " << VecCost << "\n";
         // Check if the current node must be resized, if the parent node is not
         // resized.
         if (!UnaryInstruction::isCast(E->getOpcode()) && E->Idx != 0) {
+          printf("---------------------------- ENTER AREA WHERE VecCost is modified!\n");
           const EdgeInfo &EI = E->UserTreeIndices.front();
           if ((EI.UserTE->getOpcode() != Instruction::Select ||
                EI.EdgeIdx != 0) &&
@@ -9215,6 +9220,8 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
             }
           }
         }
+        printf("DUMP TREE COSTS 1!!!\n");
+        dbgs() << "SLP:     BEFORE !!!! VecCost = " << VecCost << " CommonCost = " << CommonCost << "\n";
         LLVM_DEBUG(dumpTreeCosts(E, CommonCost, VecCost - CommonCost,
                                  ScalarCost, "Calculated costs for Tree"));
         return VecCost - ScalarCost;
@@ -9229,6 +9236,7 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
     InstructionCost VecCost = 0;
     std::tie(ScalarCost, VecCost) = getGEPCosts(
         *TTI, Ptrs, BasePtr, E->getOpcode(), CostKind, OrigScalarTy, VecTy);
+    printf("DUMP TREE COSTS 2!!!\n");
     LLVM_DEBUG(dumpTreeCosts(E, 0, VecCost, ScalarCost,
                              "Calculated GEPs cost for Tree"));
 
@@ -9296,6 +9304,7 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
                                      CostKind, *getExtractIndex(I));
     };
     auto GetVectorCost = [](InstructionCost CommonCost) { return CommonCost; };
+    printf(" ++++++++++++++++ GET COST DIFF 1\n");
     return GetCostDiff(GetScalarCost, GetVectorCost);
   }
   case Instruction::InsertElement: {
@@ -9465,6 +9474,7 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
              TTI->getCastInstrCost(VecOpcode, VecTy, SrcVecTy, CCH, CostKind,
                                    VecOpcode == Opcode ? VI : nullptr);
     };
+    printf(" ++++++++++++++++ GET COST DIFF 2\n");
     return GetCostDiff(GetScalarCost, GetVectorCost);
   }
   case Instruction::FCmp:
@@ -9519,6 +9529,7 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
       }
       return VecCost + CommonCost;
     };
+    printf(" ++++++++++++++++ GET COST DIFF 3\n");
     return GetCostDiff(GetScalarCost, GetVectorCost);
   }
   case Instruction::FNeg:
@@ -9568,6 +9579,7 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
                                          Op2Info, std::nullopt, nullptr, TLI) +
              CommonCost;
     };
+    printf(" ++++++++++++++++ GET COST DIFF 4\n");
     return GetCostDiff(GetScalarCost, GetVectorCost);
   }
   case Instruction::GetElementPtr: {
@@ -9581,19 +9593,30 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
                                   CostKind, TTI::OperandValueInfo(), VI);
     };
     auto *LI0 = cast<LoadInst>(VL0);
+    // DORU: This is where the cost of vectorization is determined.
     auto GetVectorCost = [&](InstructionCost CommonCost) {
       InstructionCost VecLdCost;
       if (E->State == TreeEntry::Vectorize) {
-        VecLdCost = TTI->getMemoryOpCost(
+        printf(" ++++++++++++++++ GET COST DIFF 5 1\n");
+        // if (VecTy->getElementType() == IntegerType::getInt8Ty(VecTy->getContext()) &&
+        // If we can vectorize i8s
+        if (VecTy->getElementType() == IntegerType::getInt8Ty(VecTy->getContext()) &&
+            TTI->canVectorizei8s()) {
+          VecLdCost = 1;
+        } else {
+          VecLdCost = TTI->getMemoryOpCost(
             Instruction::Load, VecTy, LI0->getAlign(),
             LI0->getPointerAddressSpace(), CostKind, TTI::OperandValueInfo());
+        }
       } else if (E->State == TreeEntry::StridedVectorize) {
+        printf(" ++++++++++++++++ GET COST DIFF 5 2\n");
         Align CommonAlignment =
             computeCommonAlignment<LoadInst>(UniqueValues.getArrayRef());
         VecLdCost = TTI->getStridedMemoryOpCost(
             Instruction::Load, VecTy, LI0->getPointerOperand(),
             /*VariableMask=*/false, CommonAlignment, CostKind);
       } else {
+        printf(" ++++++++++++++++ GET COST DIFF 5 3\n");
         assert(E->State == TreeEntry::ScatterVectorize && "Unknown EntryState");
         Align CommonAlignment =
             computeCommonAlignment<LoadInst>(UniqueValues.getArrayRef());
@@ -9601,9 +9624,11 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
             Instruction::Load, VecTy, LI0->getPointerOperand(),
             /*VariableMask=*/false, CommonAlignment, CostKind);
       }
+      dbgs() << "SLP:     GetVectorCost !!!! VecLdCost = " << VecLdCost << " CommonCost = " << CommonCost << "\n";
       return VecLdCost + CommonCost;
     };
 
+    printf(" ++++++++++++++++ GET COST DIFF 5\n");
     InstructionCost Cost = GetCostDiff(GetScalarCost, GetVectorCost);
     // If this node generates masked gather load then it is not a terminal node.
     // Hence address operand cost is estimated separately.
@@ -9652,6 +9677,7 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
       PointerOps[Idx] = cast<StoreInst>(V)->getPointerOperand();
     }
 
+    printf(" ++++++++++++++++ GET COST DIFF 6\n");
     return GetCostDiff(GetScalarCost, GetVectorCost) +
            GetGEPCostDiff(PointerOps, BaseSI->getPointerOperand());
   }
@@ -9676,6 +9702,7 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
       auto VecCallCosts = getVectorCallCosts(CI, VecTy, TTI, TLI, ArgTys);
       return std::min(VecCallCosts.first, VecCallCosts.second) + CommonCost;
     };
+    printf(" ++++++++++++++++ GET COST DIFF 7\n");
     return GetCostDiff(GetScalarCost, GetVectorCost);
   }
   case Instruction::ShuffleVector: {
@@ -9792,6 +9819,7 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
       // TODO: Check the reverse order too.
       return VecCost;
     };
+    printf(" ++++++++++++++++ GET COST DIFF 8\n");
     return GetCostDiff(GetScalarCost, GetVectorCost);
   }
   default:
@@ -10248,6 +10276,7 @@ static T *performExtractsShuffleAction(
 }
 
 InstructionCost BoUpSLP::getTreeCost(ArrayRef<Value *> VectorizedVals) {
+  printf(" BEGIN getTreeCost \n");
   InstructionCost Cost = 0;
   LLVM_DEBUG(dbgs() << "SLP: Calculating cost for tree of size "
                     << VectorizableTree.size() << ".\n");
@@ -10257,24 +10286,26 @@ InstructionCost BoUpSLP::getTreeCost(ArrayRef<Value *> VectorizedVals) {
   SmallPtrSet<Value *, 4> CheckedExtracts;
   for (unsigned I = 0, E = VectorizableTree.size(); I < E; ++I) {
     TreeEntry &TE = *VectorizableTree[I];
+    TE.dump();
     if (TE.State == TreeEntry::NeedToGather) {
       if (const TreeEntry *E = getTreeEntry(TE.getMainOp());
           E && E->getVectorFactor() == TE.getVectorFactor() &&
           E->isSame(TE.Scalars)) {
         // Some gather nodes might be absolutely the same as some vectorizable
         // nodes after reordering, need to handle it.
-        LLVM_DEBUG(dbgs() << "SLP: Adding cost 0 for bundle "
+        LLVM_DEBUG(dbgs() << "SLP: 1 Adding cost 0 for bundle "
                           << shortBundleName(TE.Scalars) << ".\n"
-                          << "SLP: Current total cost = " << Cost << "\n");
+                          << "1 SLP: Current total cost = " << Cost << "\n");
         continue;
       }
     }
 
     InstructionCost C = getEntryCost(&TE, VectorizedVals, CheckedExtracts);
     Cost += C;
-    LLVM_DEBUG(dbgs() << "SLP: Adding cost " << C << " for bundle "
+    LLVM_DEBUG(dbgs() << "SLP: 2 Adding cost " << C << " for bundle "
                       << shortBundleName(TE.Scalars) << ".\n"
-                      << "SLP: Current total cost = " << Cost << "\n");
+                      << "2 SLP: Current total cost = " << Cost << "\n");
+    printf("END LOOP ============\n");
   }
 
   SmallPtrSet<Value *, 16> ExtractCostCalculated;
@@ -10374,7 +10405,7 @@ InstructionCost BoUpSLP::getTreeCost(ArrayRef<Value *> VectorizedVals) {
                       IntegerType::get(FTy->getContext(), BWSz),
                       FTy->getNumElements()),
                   TTI::CastContextHint::None, CostKind);
-              LLVM_DEBUG(dbgs() << "SLP: Adding cost " << C
+              LLVM_DEBUG(dbgs() << "SLP: 3 Adding cost " << C
                                 << " for extending externally used vector with "
                                    "non-equal minimum bitwidth.\n");
               Cost += C;
@@ -10479,9 +10510,9 @@ InstructionCost BoUpSLP::getTreeCost(ArrayRef<Value *> VectorizedVals) {
           TTI::SK_PermuteSingleSrc,
           FixedVectorType::get(TE->getMainOp()->getType(), VecVF), OrigMask);
       LLVM_DEBUG(
-          dbgs() << "SLP: Adding cost " << C
+          dbgs() << "SLP: 4 Adding cost " << C
                  << " for final shuffle of insertelement external users.\n";
-          TE->dump(); dbgs() << "SLP: Current total cost = " << Cost << "\n");
+          TE->dump(); dbgs() << "3 SLP: Current total cost = " << Cost << "\n");
       Cost += C;
       return std::make_pair(TE, true);
     }
@@ -10509,11 +10540,11 @@ InstructionCost BoUpSLP::getTreeCost(ArrayRef<Value *> VectorizedVals) {
             })) {
           InstructionCost C =
               TTI->getShuffleCost(TTI::SK_PermuteSingleSrc, FTy, Mask);
-          LLVM_DEBUG(dbgs() << "SLP: Adding cost " << C
+          LLVM_DEBUG(dbgs() << "SLP: 5 Adding cost " << C
                             << " for final shuffle of insertelement "
                                "external users.\n";
                      TEs.front()->dump();
-                     dbgs() << "SLP: Current total cost = " << Cost << "\n");
+                     dbgs() << "4 SLP: Current total cost = " << Cost << "\n");
           Cost += C;
         }
       } else {
@@ -10528,11 +10559,11 @@ InstructionCost BoUpSLP::getTreeCost(ArrayRef<Value *> VectorizedVals) {
             FixedVectorType::get(TEs.back()->Scalars.front()->getType(), VF);
         InstructionCost C =
             ::getShuffleCost(*TTI, TTI::SK_PermuteTwoSrc, FTy, Mask);
-        LLVM_DEBUG(dbgs() << "SLP: Adding cost " << C
+        LLVM_DEBUG(dbgs() << "SLP: 6 Adding cost " << C
                           << " for final shuffle of vector node and external "
                              "insertelement users.\n";
                    if (TEs.front()) { TEs.front()->dump(); } TEs.back()->dump();
-                   dbgs() << "SLP: Current total cost = " << Cost << "\n");
+                   dbgs() << "5 SLP: Current total cost = " << Cost << "\n");
         Cost += C;
       }
       VF = Mask.size();
@@ -10545,6 +10576,8 @@ InstructionCost BoUpSLP::getTreeCost(ArrayRef<Value *> VectorizedVals) {
     InstructionCost InsertCost = TTI->getScalarizationOverhead(
         cast<FixedVectorType>(FirstUsers[I].first->getType()), DemandedElts[I],
         /*Insert*/ true, /*Extract*/ false, TTI::TCK_RecipThroughput);
+    // DORU: InsertCost should be 0.
+    dbgs() << "4 SLP: InsertCost = " << InsertCost << "\n";
     Cost -= InsertCost;
   }
 
@@ -10579,10 +10612,10 @@ InstructionCost BoUpSLP::getTreeCost(ArrayRef<Value *> VectorizedVals) {
       CastCost += TTI->getCastInstrCost(Opcode, DstVecTy, SrcVecTy, CCH,
                                         TTI::TCK_RecipThroughput);
       Cost += CastCost;
-      LLVM_DEBUG(dbgs() << "SLP: Adding cost " << CastCost
+      LLVM_DEBUG(dbgs() << "SLP: 7 Adding cost " << CastCost
                         << " for final resize for reduction from " << SrcVecTy
                         << " to " << DstVecTy << "\n";
-                 dbgs() << "SLP: Current total cost = " << Cost << "\n");
+                 dbgs() << "6 SLP: Current total cost = " << Cost << "\n");
     }
   }
 
@@ -15715,6 +15748,7 @@ SLPVectorizerPass::vectorizeStoreChain(ArrayRef<Value *> Chain, BoUpSLP &R,
   Size = R.getTreeSize();
   if (S.getOpcode() == Instruction::Load)
     Size = 2; // cut off masked gather small trees
+  printf(" ESTIMATE COST 2\n");
   InstructionCost Cost = R.getTreeCost();
 
   LLVM_DEBUG(dbgs() << "SLP: Found cost = " << Cost << " for VF=" << VF << "\n");
@@ -16185,6 +16219,7 @@ void SLPVectorizerPass::collectSeedInstructions(BasicBlock *BB) {
 
 bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
                                            bool MaxVFOnly) {
+  printf(" BEGIN tryToVectorizeList\n");
   if (VL.size() < 2)
     return false;
 
@@ -16193,6 +16228,7 @@ bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
 
   // Check that all of the parts are instructions of the same type,
   // we permit an alternate opcode via InstructionsState.
+  printf("       tryToVectorizeList: 1\n");
   InstructionsState S = getSameOpcode(VL, *TLI);
   if (!S.getOpcode())
     return false;
@@ -16200,6 +16236,7 @@ bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
   Instruction *I0 = cast<Instruction>(S.OpValue);
   // Make sure invalid types (including vector type) are rejected before
   // determining vectorization factor for scalar instructions.
+  printf("       tryToVectorizeList: 2\n");
   for (Value *V : VL) {
     Type *Ty = V->getType();
     if (!isa<InsertElementInst>(V) && !isValidElementType(Ty)) {
@@ -16220,7 +16257,9 @@ bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
   unsigned Sz = R.getVectorElementSize(I0);
   unsigned MinVF = R.getMinVF(Sz);
   unsigned MaxVF = std::max<unsigned>(llvm::bit_floor(VL.size()), MinVF);
+  printf("       tryToVectorizeList: 3  Sz = %d, MinVF = %d, MaxVF = %d\n", Sz, MinVF, MaxVF);
   MaxVF = std::min(R.getMaximumVF(Sz, S.getOpcode()), MaxVF);
+  printf("       tryToVectorizeList: 3  MaxVF = %d\n", MaxVF);
   if (MaxVF < 2) {
     R.getORE()->emit([&]() {
       return OptimizationRemarkMissed(SV_NAME, "SmallVF", I0)
@@ -16234,28 +16273,44 @@ bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
   bool CandidateFound = false;
   InstructionCost MinCost = SLPCostThreshold.getValue();
   Type *ScalarTy = VL[0]->getType();
+  printf("       tryToVectorizeList: 4\n");
   if (auto *IE = dyn_cast<InsertElementInst>(VL[0]))
     ScalarTy = IE->getOperand(1)->getType();
+  
+  ScalarTy->dump();
 
   unsigned NextInst = 0, MaxInst = VL.size();
+  printf("       tryToVectorizeList: 5: MaxInst = %d MinVF = %d\n", MaxInst, MinVF);
   for (unsigned VF = MaxVF; NextInst + 1 < MaxInst && VF >= MinVF; VF /= 2) {
     // No actual vectorization should happen, if number of parts is the same as
     // provided vectorization factor (i.e. the scalar type is used for vector
     // code during codegen).
+    printf("=====> ITERATION\n");
     auto *VecTy = FixedVectorType::get(ScalarTy, VF);
-    if (TTI->getNumberOfParts(VecTy) == VF)
-      continue;
+    VecTy->dump();
+    printf("=====> ITERATION 1 TTI->getNumberOfParts(VecTy) = %d\n", TTI->getNumberOfParts(VecTy));
+    // TODO: TTI->getNumberOfParts(VecTy) returns the number of parts in a legal type. For i32 it
+    // returns 1 because i32 is a legal type. For i8 it return 4 because it takes 4 i8s to make up
+    // a legal type (in this case i32).
+    // For now disable this check and allow i8 to go through.
+    // if (TTI->getNumberOfParts(VecTy) == VF)
+    //   continue;
+    printf("=====> ITERATION 2\n");
     for (unsigned I = NextInst; I < MaxInst; ++I) {
       unsigned ActualVF = std::min(MaxInst - I, VF);
+      printf("=====> ITERATION ITERATION ActualVF = %d\n", ActualVF);
 
       if (!isPowerOf2_32(ActualVF))
         continue;
 
+      printf("=====> ITERATION ITERATION 1\n");
       if (MaxVFOnly && ActualVF < MaxVF)
         break;
+      printf("=====> ITERATION ITERATION 2\n");
       if ((VF > MinVF && ActualVF <= VF / 2) || (VF == MinVF && ActualVF < 2))
         break;
 
+      printf("=====> ITERATION ITERATION 3\n");
       ArrayRef<Value *> Ops = VL.slice(I, ActualVF);
       // Check that a previous iteration of this loop did not delete the Value.
       if (llvm::any_of(Ops, [&R](Value *V) {
@@ -16264,6 +16319,7 @@ bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
           }))
         continue;
 
+      printf("=====> ITERATION ITERATION 4\n");
       LLVM_DEBUG(dbgs() << "SLP: Analyzing " << ActualVF << " operations "
                         << "\n");
 
@@ -16278,6 +16334,7 @@ bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
 
       R.computeMinimumValueSizes();
       R.transformNodes();
+      printf(" ESTIMATE COST 3\n");
       InstructionCost Cost = R.getTreeCost();
       CandidateFound = true;
       MinCost = std::min(MinCost, Cost);
@@ -16300,8 +16357,10 @@ bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
       }
     }
   }
+  printf("       tryToVectorizeList: 6 =====> Changed = %d CandidateFound = %d\n", Changed, CandidateFound);
 
   if (!Changed && CandidateFound) {
+    printf("   OUTCOME ===> NotBeneficial\n\n\n\n");
     R.getORE()->emit([&]() {
       return OptimizationRemarkMissed(SV_NAME, "NotBeneficial", I0)
              << "List vectorization was possible but not beneficial with cost "
@@ -16309,12 +16368,25 @@ bool SLPVectorizerPass::tryToVectorizeList(ArrayRef<Value *> VL, BoUpSLP &R,
              << ore::NV("Treshold", -SLPCostThreshold);
     });
   } else if (!Changed) {
+    printf("   OUTCOME ===> NotPossible\n\n\n\n");
     R.getORE()->emit([&]() {
       return OptimizationRemarkMissed(SV_NAME, "NotPossible", I0)
              << "Cannot SLP vectorize list: vectorization was impossible"
              << " with available vectorization factors";
     });
+  } else {
+    printf("   OUTCOME ===> \n\n\n\n");
   }
+  const char* env_var_name = "PREMATURE_EXIT";
+  const char* env_var_value = std::getenv(env_var_name);
+
+  if (env_var_value != nullptr) {
+    exit(1);
+    std::cout << "Environment variable " << env_var_name << " is set to: " << env_var_value << std::endl;
+  } else {
+    std::cout << "Environment variable " << env_var_name << " is not set." << std::endl;
+  }
+
   return Changed;
 }
 
@@ -17277,6 +17349,7 @@ public:
         V.transformNodes();
 
         // Estimate cost.
+        printf(" ESTIMATE COST 1\n");
         InstructionCost TreeCost = V.getTreeCost(VL);
         InstructionCost ReductionCost =
             getReductionCost(TTI, VL, IsCmpSelMinMax, ReduxWidth, RdxFMF);
@@ -17607,7 +17680,7 @@ private:
       llvm_unreachable("Expected arithmetic or min/max reduction operation");
     }
 
-    LLVM_DEBUG(dbgs() << "SLP: Adding cost " << VectorCost - ScalarCost
+    LLVM_DEBUG(dbgs() << "SLP: 8 Adding cost " << VectorCost - ScalarCost
                       << " for reduction of " << shortBundleName(ReducedVals)
                       << " (It is a splitting reduction)\n");
     return VectorCost - ScalarCost;

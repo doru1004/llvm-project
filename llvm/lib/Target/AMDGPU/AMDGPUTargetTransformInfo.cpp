@@ -335,9 +335,16 @@ unsigned GCNTTIImpl::getMinVectorRegisterBitWidth() const {
 }
 
 unsigned GCNTTIImpl::getMaximumVF(unsigned ElemWidth, unsigned Opcode) const {
+  printf("BEGIN GCNTTIImpl::getMaximumVF in AMDGPUTargetTransformInfo.cpp\n");
+  if (Opcode == Instruction::Load)
+    printf("It's a LOAD!!\n");
+  else if (Opcode == Instruction::Store)
+    printf("It's a STORE!!\n");
+  else
+    printf("OTHER OPCODE!\n");
   if (Opcode == Instruction::Load || Opcode == Instruction::Store)
     return 32 * 4 / ElemWidth;
-  return (ElemWidth == 16 && ST->has16BitInsts()) ? 2
+  return ElemWidth == 8 ? 4 : (ElemWidth == 16 && ST->has16BitInsts()) ? 2
        : (ElemWidth == 32 && ST->hasPackedFP32Ops()) ? 2
        : 1;
 }
@@ -1102,47 +1109,76 @@ Value *GCNTTIImpl::rewriteIntrinsicWithAddressSpace(IntrinsicInst *II,
   }
 }
 
+InstructionCost GCNTTIImpl::getScalarizationOverhead(VectorType *InTy,
+      const APInt &DemandedElts, bool Insert, bool Extract,
+      TTI::TargetCostKind CostKind) {
+  printf("   AMDGPU getScalarizationOverhead version!!!\n");
+  unsigned NumVectorElts = cast<FixedVectorType>(InTy)->getNumElements();
+  if (NumVectorElts > 1 && InTy->getElementType() == IntegerType::getInt8Ty(InTy->getContext()))
+    return 0;
+  return BaseT::getScalarizationOverhead(InTy, DemandedElts, Insert, Extract, CostKind);
+}
+
 InstructionCost GCNTTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
                                            VectorType *VT, ArrayRef<int> Mask,
                                            TTI::TargetCostKind CostKind,
                                            int Index, VectorType *SubTp,
                                            ArrayRef<const Value *> Args,
                                            const Instruction *CxtI) {
+  printf("   AMDGPU getShuffleCost ==>>> \n");
+  VT->dump();
   if (!isa<FixedVectorType>(VT))
     return BaseT::getShuffleCost(Kind, VT, Mask, CostKind, Index, SubTp);
+  printf("   AMDGPU getShuffleCost ==>>> 1\n");
 
   Kind = improveShuffleKindFromMask(Kind, Mask, VT, Index, SubTp);
 
   // Larger vector widths may require additional instructions, but are
   // typically cheaper than scalarized versions.
   unsigned NumVectorElts = cast<FixedVectorType>(VT)->getNumElements();
+  printf("   AMDGPU getShuffleCost ==>>> 2 NumVectorElts = %d\n", NumVectorElts);
+
+  if (NumVectorElts > 1 && VT->getElementType() == IntegerType::getInt8Ty(VT->getContext())) {
+    printf(" =========================================>>> NumVectorElts = %d x i8\n", NumVectorElts);
+    return 0;
+  }
+
   if (ST->getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS &&
       DL.getTypeSizeInBits(VT->getElementType()) == 16) {
+    printf("   AMDGPU getShuffleCost ==>>> 2 1\n");
     bool HasVOP3P = ST->hasVOP3PInsts();
     unsigned RequestedElts =
         count_if(Mask, [](int MaskElt) { return MaskElt != -1; });
+    printf("   AMDGPU getShuffleCost ==>>> 2 2\n");
     if (RequestedElts == 0)
       return 0;
+    printf("   AMDGPU getShuffleCost ==>>> 2 3\n");
     switch (Kind) {
     case TTI::SK_Broadcast:
     case TTI::SK_Reverse:
     case TTI::SK_PermuteSingleSrc: {
       // With op_sel VOP3P instructions freely can access the low half or high
       // half of a register, so any swizzle of two elements is free.
-      if (HasVOP3P && NumVectorElts == 2)
+      if (HasVOP3P && NumVectorElts == 2) {
+        printf("   AMDGPU getShuffleCost ==>>> 2 4\n");
         return 0;
+      }
       unsigned NumPerms = alignTo(RequestedElts, 2) / 2;
       // SK_Broadcast just reuses the same mask
       unsigned NumPermMasks = Kind == TTI::SK_Broadcast ? 1 : NumPerms;
+      printf("   AMDGPU getShuffleCost ==>>> 2 5\n");
       return NumPerms + NumPermMasks;
     }
     case TTI::SK_ExtractSubvector:
     case TTI::SK_InsertSubvector: {
       // Even aligned accesses are free
-      if (!(Index % 2))
+      if (!(Index % 2)) {
+        printf("   AMDGPU getShuffleCost ==>>> 2 6\n");
         return 0;
+      }
       // Insert/extract subvectors only require shifts / extract code to get the
       // relevant bits
+      printf("   AMDGPU getShuffleCost ==>>> 2 7\n");
       return alignTo(RequestedElts, 2) / 2;
     }
     case TTI::SK_PermuteTwoSrc:
@@ -1151,6 +1187,7 @@ InstructionCost GCNTTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
       unsigned NumPerms = alignTo(RequestedElts, 2) / 2;
       // SK_Select just reuses the same mask
       unsigned NumPermMasks = Kind == TTI::SK_Select ? 1 : NumPerms;
+      printf("   AMDGPU getShuffleCost ==>>> 2 8\n");
       return NumPerms + NumPermMasks;
     }
 
@@ -1158,6 +1195,7 @@ InstructionCost GCNTTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
       break;
     }
   }
+  printf("   AMDGPU getShuffleCost ==>>> 3\n");
 
   return BaseT::getShuffleCost(Kind, VT, Mask, CostKind, Index, SubTp);
 }
@@ -1346,14 +1384,17 @@ int GCNTTIImpl::get64BitInstrCost(TTI::TargetCostKind CostKind) const {
 
 std::pair<InstructionCost, MVT>
 GCNTTIImpl::getTypeLegalizationCost(Type *Ty) const {
+  printf("   AMDGPU getTypeLegalizationCost  1\n");
   std::pair<InstructionCost, MVT> Cost = BaseT::getTypeLegalizationCost(Ty);
   auto Size = DL.getTypeSizeInBits(Ty);
   // Maximum load or store can handle 8 dwords for scalar and 4 for
   // vector ALU. Let's assume anything above 8 dwords is expensive
   // even if legal.
+  printf("   AMDGPU getTypeLegalizationCost  2\n");
   if (Size <= 256)
     return Cost;
 
+  printf("   AMDGPU getTypeLegalizationCost  3\n");
   Cost.first += (Size + 255) / 256;
   return Cost;
 }
@@ -1364,4 +1405,9 @@ unsigned GCNTTIImpl::getPrefetchDistance() const {
 
 bool GCNTTIImpl::shouldPrefetchAddressSpace(unsigned AS) const {
   return AMDGPU::isFlatGlobalAddrSpace(AS);
+}
+
+bool GCNTTIImpl::canVectorizei8s() const {
+  printf("BEGIN GCNTTIImpl::canVectorizei8s in AMDGPUTargetTransformInfo.cpp\n");
+  return true;
 }

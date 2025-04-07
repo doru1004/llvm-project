@@ -230,6 +230,11 @@ public:
 
   InstructionCost getVectorSplitCost() { return 0; }
 
+  InstructionCost getScalarizationOverhead(VectorType *InTy,
+                                           const APInt &DemandedElts,
+                                           bool Insert, bool Extract,
+                                           TTI::TargetCostKind CostKind);
+
   InstructionCost getShuffleCost(TTI::ShuffleKind Kind, VectorType *Tp,
                                  ArrayRef<int> Mask,
                                  TTI::TargetCostKind CostKind, int Index,
@@ -265,6 +270,9 @@ public:
 
   /// \return if target want to issue a prefetch in address space \p AS.
   bool shouldPrefetchAddressSpace(unsigned AS) const override;
+
+  /// \return return true if we can pack 4 i8s into an i32.
+  bool canVectorizei8s() const;
 };
 
 } // end namespace llvm

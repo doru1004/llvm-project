@@ -684,6 +684,7 @@ public:
                                   TTI::TargetCostKind CostKind,
                                   TTI::OperandValueInfo OpInfo,
                                   const Instruction *I) const {
+    printf("  getMemoryOpCost 1\n");
     return 1;
   }
 
@@ -956,6 +957,8 @@ public:
   bool hasArmWideBranch(bool) const { return false; }
 
   unsigned getMaxNumArgs() const { return UINT_MAX; }
+  
+  bool canVectorizei8s() const { return false; }
 
 protected:
   // Obtain the minimum required size to hold the value (without the sign)
