@@ -344,9 +344,10 @@ unsigned GCNTTIImpl::getMinVectorRegisterBitWidth() const {
 unsigned GCNTTIImpl::getMaximumVF(unsigned ElemWidth, unsigned Opcode) const {
   if (Opcode == Instruction::Load || Opcode == Instruction::Store)
     return 32 * 4 / ElemWidth;
-  return (ElemWidth == 16 && ST->has16BitInsts()) ? 2
-       : (ElemWidth == 32 && ST->hasPackedFP32Ops()) ? 2
-       : 1;
+  return ElemWidth == 8                                ? 4
+         : (ElemWidth == 16 && ST->has16BitInsts())    ? 2
+         : (ElemWidth == 32 && ST->hasPackedFP32Ops()) ? 2
+                                                       : 1;
 }
 
 unsigned GCNTTIImpl::getLoadVectorFactor(unsigned VF, unsigned LoadSize,
@@ -562,6 +563,7 @@ InstructionCost GCNTTIImpl::getArithmeticInstrCost(
     if (ST->has16BitInsts() && SLT == MVT::i16)
       NElts = (NElts + 1) / 2;
 
+    // i32
     return LT.first * NElts * getFullRateInstrCost();
   case ISD::MUL: {
     const int QuarterRateCost = getQuarterRateInstrCost(CostKind);
@@ -1422,4 +1424,31 @@ void GCNTTIImpl::collectKernelLaunchBounds(
   std::pair<unsigned, unsigned> WavesPerEU = ST->getWavesPerEU(F);
   LB.push_back({"amdgpu-waves-per-eu[0]", WavesPerEU.first});
   LB.push_back({"amdgpu-waves-per-eu[1]", WavesPerEU.second});
+}
+
+InstructionCost GCNTTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src,
+                                            Align Alignment,
+                                            unsigned AddressSpace,
+                                            TTI::TargetCostKind CostKind,
+                                            TTI::OperandValueInfo OpInfo,
+                                            const Instruction *I) {
+  if (VectorType *VecTy = dyn_cast<VectorType>(Src))
+    if (Opcode == Instruction::Load &&
+        VecTy->getElementType() ==
+            IntegerType::getInt8Ty(VecTy->getContext())) {
+      unsigned ElementCount = VecTy->getElementCount().getFixedValue();
+      return ((ElementCount - 1) / 4) + 1;
+    }
+  return BaseT::getMemoryOpCost(Opcode, Src, Alignment, AddressSpace, CostKind,
+                                OpInfo, I);
+}
+
+unsigned GCNTTIImpl::getNumberOfParts(Type *Tp) {
+  if (VectorType *VecTy = dyn_cast<VectorType>(Tp))
+    if (VecTy->getElementType() ==
+        IntegerType::getInt8Ty(VecTy->getContext())) {
+      unsigned ElementCount = VecTy->getElementCount().getFixedValue();
+      return ((ElementCount - 1) / 4) + 1;
+    }
+  return BaseT::getNumberOfParts(Tp);
 }
