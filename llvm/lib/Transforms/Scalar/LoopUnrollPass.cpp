@@ -929,6 +929,7 @@ bool llvm::computeUnrollCount(
     bool MaxOrZero, unsigned TripMultiple, const UnrollCostEstimator &UCE,
     TargetTransformInfo::UnrollingPreferences &UP,
     TargetTransformInfo::PeelingPreferences &PP, bool &UseUpperBound) {
+  printf("computeUnrollCount\n");
 
   unsigned LoopSize = UCE.getRolledLoopSize();
 
@@ -939,7 +940,7 @@ bool llvm::computeUnrollCount(
 
   const bool ExplicitUnroll = PragmaCount > 0 || PragmaFullUnroll ||
                               PragmaEnableUnroll || UserUnrollCount;
-
+  printf("computeUnrollCount ExplicitUnroll = %d\n", ExplicitUnroll);
   PragmaInfo PInfo(UserUnrollCount, PragmaFullUnroll, PragmaCount,
                    PragmaEnableUnroll);
   // Use an explicit peel count that has been specified for testing. In this
@@ -956,8 +957,10 @@ bool llvm::computeUnrollCount(
   // Check for explicit Count.
   // 1st priority is unroll count set by "unroll-count" option.
   // 2nd priority is unroll count set by pragma.
+  printf("computeUnrollCount 2\n");
   if (auto UnrollFactor = shouldPragmaUnroll(L, PInfo, TripMultiple, TripCount,
                                              MaxTripCount, UCE, UP)) {
+    printf("computeUnrollCount THEN UnrollFactor = %d\n", UnrollFactor);
     UP.Count = *UnrollFactor;
 
     if (UserUnrollCount || (PragmaCount > 0)) {
@@ -967,6 +970,7 @@ bool llvm::computeUnrollCount(
     UP.Runtime |= (PragmaCount > 0);
     return ExplicitUnroll;
   } else {
+    printf("computeUnrollCount ELSE COND 1: %d\n", ExplicitUnroll && TripCount != 0);
     if (ExplicitUnroll && TripCount != 0) {
       // If the loop has an unrolling pragma, we want to be more aggressive with
       // unrolling limits. Set thresholds to at least the PragmaUnrollThreshold
@@ -976,6 +980,7 @@ bool llvm::computeUnrollCount(
           std::max<unsigned>(UP.PartialThreshold, PragmaUnrollThreshold);
     }
   }
+  printf("computeUnrollCount 3\n");
 
   // 3rd priority is exact full unrolling.  This will eliminate all copies
   // of some exit test.
@@ -1077,6 +1082,7 @@ bool llvm::computeUnrollCount(
   }
 
   // Don't unroll a small upper bound loop unless user or TTI asked to do so.
+  printf("  =======> MaxTripCount = %d && !UP.Force = %d && MaxTripCount < UP.MaxUpperBound = %d\n", MaxTripCount, !UP.Force, MaxTripCount < UP.MaxUpperBound);
   if (MaxTripCount && !UP.Force && MaxTripCount < UP.MaxUpperBound) {
     UP.Count = 0;
     return false;
@@ -1104,6 +1110,7 @@ bool llvm::computeUnrollCount(
 
   // Reduce unroll count to be the largest power-of-two factor of
   // the original count which satisfies the threshold limit.
+  printf("  =======> UP.Count != 0 = %d && UCE.getUnrolledLoopSize(UP) > UP.PartialThreshold = %d\n", UP.Count != 0, UCE.getUnrolledLoopSize(UP) > UP.PartialThreshold);
   while (UP.Count != 0 &&
          UCE.getUnrolledLoopSize(UP) > UP.PartialThreshold)
     UP.Count >>= 1;
