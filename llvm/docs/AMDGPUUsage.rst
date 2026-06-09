@@ -2166,6 +2166,23 @@ arguments.
 
   %val = load i32, ptr %in, align 4, !amdgpu.last.use !{}
 
+'``amdgpu.vgpr.pin``' Metadata
+------------------------------
+
+May be attached to an ``alloca`` instruction to request that, if the alloca is
+promoted to a vector register (see the promote-alloca pass), its value be kept
+resident in vector registers (VGPRs) rather than spilled to scratch memory. This
+takes no arguments.
+
+This is a best-effort hint: if the simultaneously pinned values exceed the
+available VGPR budget the request is dropped and the value is allocated normally
+(a remark is emitted under ``-Rpass-missed=si-pin-vgpr``). The metadata has no
+effect on allocas that are not promoted to a vector register.
+
+.. code-block:: llvm
+
+  %arr = alloca [16 x i32], align 4, addrspace(5), !amdgpu.vgpr.pin !{}
+
 '``amdgpu.no.remote.memory``' Metadata
 ---------------------------------------------
 

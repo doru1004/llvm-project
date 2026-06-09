@@ -174,6 +174,12 @@ constexpr int mapToDWARFAddrSpace(unsigned LLVMAddrSpace) {
   return -1;
 }
 
+/// Metadata name on an ``alloca`` requesting that, if it is promoted to a
+/// vector, its value be kept VGPR-resident rather than spilled. Shared contract
+/// between the producer (clang's ``amdgpu_pin_vgpr`` attribute) and the
+/// consumer (AMDGPUPromoteAlloca).
+inline constexpr char VGPRPinMetadataName[] = "amdgpu.vgpr.pin";
+
 /// Get the null pointer value for the given address space.
 constexpr int64_t getNullPointerValue(unsigned AS) {
   switch (AS) {

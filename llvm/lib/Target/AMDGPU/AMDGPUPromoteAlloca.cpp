@@ -1113,11 +1113,28 @@ void AMDGPUPromoteAllocaImpl::analyzePromoteToVector(AllocaAnalysis &AA) const {
   }
 }
 
+// Mark a promoted vector def with llvm.amdgcn.internal.vgpr.pin so SIPinVGPR
+// keeps it VGPR-resident. The intrinsic is a void marker, so V stays the value
+// downstream code uses. Builder must be positioned past V's def.
+static void pinPromotedVector(Value *V, IRBuilderBase &Builder) {
+  // The verifier rejects (vector-)i1; promote-to-vector never picks an i1 elt.
+  assert(!V->getType()->getScalarType()->isIntegerTy(1) &&
+         "vgpr.pin does not accept (vector-)i1 values");
+  Builder.CreateIntrinsic(Intrinsic::amdgcn_internal_vgpr_pin, {V->getType()},
+                          {V});
+}
+
 void AMDGPUPromoteAllocaImpl::promoteAllocaToVector(AllocaAnalysis &AA) {
   LLVM_DEBUG(dbgs() << "Promoting to vectors: " << *AA.Alloca << '\n');
   LLVM_DEBUG(dbgs() << "  type conversion: " << *AA.Alloca->getAllocatedType()
                     << " -> " << *AA.Vector.Ty << '\n');
   const unsigned VecStoreSize = DL->getTypeStoreSize(AA.Vector.Ty);
+
+  // If the source marked this alloca with !amdgpu.vgpr.pin (clang's
+  // amdgpu_pin_vgpr attribute), pin every promoted store def so SIPinVGPR keeps
+  // it VGPR-resident. Over-budget cases rely on SIPinVGPR's un-pin backstop.
+  // FIXME: self-limit the pinned set instead of leaning on the backstop.
+  const bool ShouldPin = AA.Alloca->hasMetadata(AMDGPU::VGPRPinMetadataName);
 
   Type *VecEltTy = AA.Vector.Ty->getElementType();
   const unsigned ElementSize = DL->getTypeSizeInBits(VecEltTy) / 8;
@@ -1133,6 +1150,8 @@ void AMDGPUPromoteAllocaImpl::promoteAllocaToVector(AllocaAnalysis &AA) {
   IRBuilder<> Builder(&*InitInsertPos);
   Value *AllocaInitValue = Builder.CreateFreeze(PoisonValue::get(AA.Vector.Ty));
   AllocaInitValue->takeName(AA.Alloca);
+  // The frozen-poison init carries no data, so it is not pinned; the real store
+  // defs below carry the pin.
 
   Updater.AddAvailableValue(AA.Alloca->getParent(), AllocaInitValue);
 
@@ -1168,8 +1187,17 @@ void AMDGPUPromoteAllocaImpl::promoteAllocaToVector(AllocaAnalysis &AA) {
     // placeholder may cause stale pointer being referenced when doing
     // placeholder replacement.
     if (Result && (!isa<Instruction>(Result) ||
-                   !Placeholders.contains(cast<Instruction>(Result))))
+                   !Placeholders.contains(cast<Instruction>(Result)))) {
+      // Pin instruction-typed defs only: constants are rematerialized, not
+      // spilled, and a full-vector store of an argument already lives in a
+      // register. Insert at I (Result dominates I, and I is always a valid
+      // non-terminator insertion point, unlike Result->getNextNode()).
+      if (ShouldPin && isa<Instruction>(Result)) {
+        IRBuilder<> PinBuilder(I);
+        pinPromotedVector(Result, PinBuilder);
+      }
       Updater.AddAvailableValue(BB, Result);
+    }
   });
 
   // Now fixup the placeholders.
