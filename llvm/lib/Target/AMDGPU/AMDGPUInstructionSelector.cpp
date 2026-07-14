@@ -4550,6 +4550,35 @@ bool AMDGPUInstructionSelector::selectStackRestore(MachineInstr &MI) const {
   return true;
 }
 
+bool AMDGPUInstructionSelector::selectRegLoadStore(MachineInstr &I) const {
+  // Remember where the selected machine instruction will land.
+  MachineBasicBlock::iterator II = std::next(I.getIterator());
+
+  if (!selectImpl(I, *CoverageInfo))
+    return false;
+
+  // On a movrel subtarget the selected V_LOAD_IDX / V_STORE_IDX expands to an
+  // M0-relative move (see AMDGPUAssignIdxToM0 and expandVGPRIdxLoadStore). Add
+  // an implicit-def of $m0: it records that the eventual move clobbers M0, and
+  // - because an instruction defining a physical register is not hoisted/sunk -
+  // keeps a divergent access pinned inside its waterfall loop.
+  // AMDGPUAssignIdxToM0 removes it when it writes M0 for real.
+  if (!Subtarget->hasMovrel())
+    return true;
+
+  MachineInstr *Sel = &*std::prev(II);
+  if (SIInstrInfo::isVGPRIdxLoadStore(Sel->getOpcode())) {
+    // Record that this function performs a VGPR "as memory" access so
+    // AMDGPUAssignIdxToM0 can skip its scan otherwise.
+    Sel->getMF()->getInfo<SIMachineFunctionInfo>()->setHasVGPRAsMemoryAccess();
+    MachineOperand *Idx = TII.getNamedOperand(*Sel, AMDGPU::OpName::idx);
+    if (Idx && Idx->isReg())
+      Sel->addOperand(MachineOperand::CreateReg(AMDGPU::M0, /*isDef=*/true,
+                                                /*isImp=*/true));
+  }
+  return true;
+}
+
 bool AMDGPUInstructionSelector::select(MachineInstr &I) {
 
   if (!I.isPreISelOpcode()) {
@@ -4685,6 +4714,9 @@ bool AMDGPUInstructionSelector::select(MachineInstr &I) {
   case AMDGPU::G_AMDGPU_BVH_INTERSECT_RAY:
   case AMDGPU::G_AMDGPU_BVH8_INTERSECT_RAY:
     return selectBVHIntersectRayIntrinsic(I);
+  case AMDGPU::G_AMDGPU_REG_LOAD:
+  case AMDGPU::G_AMDGPU_REG_STORE:
+    return selectRegLoadStore(I);
   case AMDGPU::G_SBFX:
   case AMDGPU::G_UBFX:
     return selectG_SBFX_UBFX(I);

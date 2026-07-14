@@ -487,6 +487,11 @@ private:
   bool HasNonSpillStackObjects = false;
   bool IsStackRealigned = false;
 
+  // Set during instruction selection when the function performs a VGPR
+  // ("as memory", address space 13) indexed load/store. Lets
+  // AMDGPUAssignIdxToM0 skip its instruction scan when no such access exists.
+  bool HasVGPRAsMemoryAccess = false;
+
   unsigned NumSpilledSGPRs = 0;
   unsigned NumSpilledVGPRs = 0;
 
@@ -1096,6 +1101,10 @@ public:
   void setHasSpilledVGPRs(bool Spill = true) {
     HasSpilledVGPRs = Spill;
   }
+
+  bool hasVGPRAsMemoryAccess() const { return HasVGPRAsMemoryAccess; }
+
+  void setHasVGPRAsMemoryAccess(bool V = true) { HasVGPRAsMemoryAccess = V; }
 
   bool hasNonSpillStackObjects() const {
     return HasNonSpillStackObjects;

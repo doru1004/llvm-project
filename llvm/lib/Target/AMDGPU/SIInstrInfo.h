@@ -348,6 +348,15 @@ public:
 
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
+  /// \returns true if \p Opcode is a VGPR "as memory" (address space 13)
+  /// indexed load/store pseudo (V_LOAD_IDX_B<N> / V_STORE_IDX_B<N>).
+  static bool isVGPRIdxLoadStore(unsigned Opcode);
+
+  /// Expand a V_LOAD_IDX_B<N> / V_STORE_IDX_B<N> pseudo into indexed moves
+  /// (v_movrels_b32 / v_movreld_b32) over the wave's vector registers. M0 must
+  /// already hold the dword index (see AMDGPUAssignIdxToM0).
+  void expandVGPRIdxLoadStore(MachineInstr &MI) const;
+
   void
   reMaterialize(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
                 Register DestReg, unsigned SubIdx, const MachineInstr &Orig,

@@ -1909,10 +1909,95 @@ unsigned SIInstrInfo::getNumWaitStates(const MachineInstr &MI) {
   }
 }
 
+bool SIInstrInfo::isVGPRIdxLoadStore(unsigned Opcode) {
+  switch (Opcode) {
+  case AMDGPU::V_LOAD_IDX_B32:
+  case AMDGPU::V_LOAD_IDX_B64:
+  case AMDGPU::V_LOAD_IDX_B96:
+  case AMDGPU::V_LOAD_IDX_B128:
+  case AMDGPU::V_LOAD_IDX_B160:
+  case AMDGPU::V_LOAD_IDX_B192:
+  case AMDGPU::V_LOAD_IDX_B224:
+  case AMDGPU::V_LOAD_IDX_B256:
+  case AMDGPU::V_LOAD_IDX_B288:
+  case AMDGPU::V_LOAD_IDX_B320:
+  case AMDGPU::V_LOAD_IDX_B352:
+  case AMDGPU::V_LOAD_IDX_B384:
+  case AMDGPU::V_LOAD_IDX_B512:
+  case AMDGPU::V_LOAD_IDX_B1024:
+  case AMDGPU::V_STORE_IDX_B32:
+  case AMDGPU::V_STORE_IDX_B64:
+  case AMDGPU::V_STORE_IDX_B96:
+  case AMDGPU::V_STORE_IDX_B128:
+  case AMDGPU::V_STORE_IDX_B160:
+  case AMDGPU::V_STORE_IDX_B192:
+  case AMDGPU::V_STORE_IDX_B224:
+  case AMDGPU::V_STORE_IDX_B256:
+  case AMDGPU::V_STORE_IDX_B288:
+  case AMDGPU::V_STORE_IDX_B320:
+  case AMDGPU::V_STORE_IDX_B352:
+  case AMDGPU::V_STORE_IDX_B384:
+  case AMDGPU::V_STORE_IDX_B512:
+  case AMDGPU::V_STORE_IDX_B1024:
+    return true;
+  default:
+    return false;
+  }
+}
+
+void SIInstrInfo::expandVGPRIdxLoadStore(MachineInstr &MI) const {
+  MachineBasicBlock &MBB = *MI.getParent();
+  const DebugLoc &DL = MI.getDebugLoc();
+  const bool IsStore = MI.mayStore();
+
+  Register Data = getNamedOperand(MI, AMDGPU::OpName::data)->getReg();
+  unsigned Offset = getNamedOperand(MI, AMDGPU::OpName::offset)->getImm();
+
+  // $data is operand 0 of both the load (def) and store (use) pseudos.
+  unsigned NumDwords = RI.getRegSizeInBits(*getOpRegClass(MI, 0)) / 32;
+
+  // A statically out-of-range dword $offset would fold into a base register
+  // outside the VGPR file (an invalid physical register). Such an access is
+  // out of bounds (undefined behavior); diagnose it and clamp the base so we
+  // never emit an invalid register.
+  const unsigned NumVGPRs = AMDGPU::VGPR_32RegClass.getNumRegs();
+  if (Offset + NumDwords > NumVGPRs) {
+    const Function &F = MBB.getParent()->getFunction();
+    F.getContext().diagnose(DiagnosticInfoUnsupported(
+        F, "out of bounds access of VGPR 'as memory' address space (13)",
+        MI.getDebugLoc()));
+    Offset = NumVGPRs - NumDwords;
+  }
+
+  // The dword index is (M0 + $offset). Fold $offset into the base register so
+  // each dword i reads/writes VGPR($offset + i + M0) via the M0-relative move.
+  for (unsigned i = 0; i < NumDwords; ++i) {
+    Register Base = AMDGPU::VGPR0 + Offset + i;
+    Register Sub = Data;
+    if (NumDwords != 1)
+      Sub = RI.getSubReg(Data, RI.getSubRegFromChannel(i));
+    if (IsStore)
+      BuildMI(MBB, MI, DL, get(AMDGPU::V_MOVRELD_B32_e32))
+          .addReg(Base, RegState::Undef)
+          .addReg(Sub);
+    else
+      BuildMI(MBB, MI, DL, get(AMDGPU::V_MOVRELS_B32_e32), Sub)
+          .addReg(Base, RegState::Undef);
+  }
+
+  MI.eraseFromParent();
+}
+
 bool SIInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   MachineBasicBlock &MBB = *MI.getParent();
   DebugLoc DL = MBB.findDebugLoc(MI);
   const AMDGPU::LaneMaskConstants &LMC = AMDGPU::LaneMaskConstants::get(ST);
+
+  if (isVGPRIdxLoadStore(MI.getOpcode())) {
+    expandVGPRIdxLoadStore(MI);
+    return true;
+  }
+
   switch (MI.getOpcode()) {
   default: return TargetInstrInfo::expandPostRAPseudo(MI);
   case AMDGPU::S_MOV_B64_term:
@@ -5590,6 +5675,16 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
     const bool IsDst = Desc.getOpcode() == AMDGPU::V_MOVRELD_B32_e32 ||
                        Desc.getOpcode() == AMDGPU::V_MOVRELD_B32_e64;
 
+    // The indirect-vector form indexes an SSA vector operand, which appears as
+    // an implicit whole-vector use (of which src0 is a subregister). A VGPR
+    // "as memory" access (lowered by expandVGPRIdxLoadStore) instead indexes
+    // the wave's vector registers directly and carries no such implicit
+    // operand; it only exists after register allocation. The structural checks
+    // that need the implicit operand are therefore gated either on being pre-RA
+    // (where every movrel is the indirect-vector form) or on that operand
+    // actually being present.
+    const bool IsPreRA = !MI.getMF()->getProperties().hasNoVRegs();
+
     const unsigned StaticNumOps =
         Desc.getNumOperands() + Desc.implicit_uses().size();
     const unsigned NumImplicitOps = IsDst ? 2 : 1;
@@ -5598,7 +5693,7 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
     // post RA scheduler where the main implicit operand is killed and
     // implicit-defs are added for sub-registers that remain live after this
     // instruction.
-    if (MI.getNumOperands() < StaticNumOps + NumImplicitOps) {
+    if (IsPreRA && MI.getNumOperands() < StaticNumOps + NumImplicitOps) {
       ErrInfo = "missing implicit register operands";
       return false;
     }
@@ -5611,20 +5706,26 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
       }
 
       unsigned UseOpIdx;
-      if (!MI.isRegTiedToUseOperand(StaticNumOps, &UseOpIdx) ||
-          UseOpIdx != StaticNumOps + 1) {
+      if (IsPreRA && (!MI.isRegTiedToUseOperand(StaticNumOps, &UseOpIdx) ||
+                      UseOpIdx != StaticNumOps + 1)) {
         ErrInfo = "movrel implicit operands should be tied";
         return false;
       }
     }
 
-    const MachineOperand &Src0 = MI.getOperand(Src0Idx);
-    const MachineOperand &ImpUse
-      = MI.getOperand(StaticNumOps + NumImplicitOps - 1);
-    if (!ImpUse.isReg() || !ImpUse.isUse() ||
-        !isSubRegOf(RI, ImpUse, IsDst ? *Dst : Src0)) {
-      ErrInfo = "src0 should be subreg of implicit vector use";
-      return false;
+    // Whenever the implicit whole-vector operand is present - the traditional
+    // indirect-vector form, both before and after register allocation - src0
+    // must be a subregister of it. The file-indexed VGPR "as memory" form has
+    // no such operand and is exempt.
+    if (MI.getNumOperands() >= StaticNumOps + NumImplicitOps) {
+      const MachineOperand &Src0 = MI.getOperand(Src0Idx);
+      const MachineOperand &ImpUse =
+          MI.getOperand(StaticNumOps + NumImplicitOps - 1);
+      if (!ImpUse.isReg() || !ImpUse.isUse() ||
+          !isSubRegOf(RI, ImpUse, IsDst ? *Dst : Src0)) {
+        ErrInfo = "src0 should be subreg of implicit vector use";
+        return false;
+      }
     }
   }
 
@@ -7431,6 +7532,17 @@ SIInstrInfo::legalizeOperands(MachineInstr &MI,
   // Legalize FLAT
   if (isFLAT(MI)) {
     legalizeOperandsFLAT(MRI, MI);
+    return CreatedBB;
+  }
+
+  // A VGPR "as memory" indexed load/store needs its dword index in an SGPR (it
+  // becomes M0). A divergent (VGPR) index is made uniform with a waterfall
+  // loop that executes the access once per unique index across the wave.
+  if (SIInstrInfo::isVGPRIdxLoadStore(MI.getOpcode())) {
+    MachineOperand *Idx = getNamedOperand(MI, AMDGPU::OpName::idx);
+    if (Idx && Idx->isReg() && Idx->getReg().isVirtual() &&
+        !RI.isSGPRClass(MRI.getRegClass(Idx->getReg())))
+      CreatedBB = generateWaterFallLoop(*this, MI, {Idx}, MDT);
     return CreatedBB;
   }
 
@@ -10905,9 +11017,16 @@ SIInstrInfo::getGenericValueUniformity(const MachineInstr &MI) const {
     return ValueUniformity::Default;
   }
 
+  // A VGPR ("as memory") indexed load is always divergent: it reads the wave's
+  // per-lane view of its vector registers, so even a uniform index yields a
+  // per-lane (divergent) value.
+  if (Opcode == AMDGPU::G_AMDGPU_REG_LOAD)
+    return ValueUniformity::NeverUniform;
+
   // Loads from the private and flat address spaces are divergent, because
   // threads can execute the load instruction with the same inputs and get
-  // different results.
+  // different results. The VGPR address space is likewise divergent (see
+  // above; this covers a G_LOAD not yet legalized to G_AMDGPU_REG_LOAD).
   //
   // All other loads are not divergent, because if threads issue loads with the
   // same arguments, they will always get the same result.
@@ -10918,7 +11037,8 @@ SIInstrInfo::getGenericValueUniformity(const MachineInstr &MI) const {
 
     if (llvm::any_of(MI.memoperands(), [](const MachineMemOperand *mmo) {
           return mmo->getAddrSpace() == AMDGPUAS::PRIVATE_ADDRESS ||
-                 mmo->getAddrSpace() == AMDGPUAS::FLAT_ADDRESS;
+                 mmo->getAddrSpace() == AMDGPUAS::FLAT_ADDRESS ||
+                 mmo->getAddrSpace() == AMDGPUAS::VGPR;
         })) {
       // At least one MMO in a non-global address space.
       return ValueUniformity::NeverUniform;

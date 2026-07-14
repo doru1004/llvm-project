@@ -13110,12 +13110,90 @@ static bool addressMayBeAccessedAsPrivate(const MachineMemOperand *MMO,
   return true;
 }
 
+// Lower a load or store of the VGPR ("as memory") address space (13) to a
+// REG_LOAD / REG_STORE target node. The 32-bit pointer is a byte offset into
+// the wave's view of its vector registers; the target node carries the dword
+// index (pointer >> 2). Recognizing a constant dword offset is left to the
+// selection patterns, which fold an (add index, imm) shape into the pseudo.
+//
+// TODO: sub-dword (8/16-bit) accesses are not yet supported; they are
+// diagnosed as unsupported below.
+SDValue SITargetLowering::LowerLoadStoreVGPR(SDValue Op,
+                                             SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  MemSDNode *MemOp = cast<MemSDNode>(Op);
+  EVT MemVT = MemOp->getMemoryVT();
+  unsigned BitWidth = MemVT.getSizeInBits();
+
+  // Only whole-dword, non-extending/non-truncating accesses are implemented.
+  // Reject anything else with a diagnostic (replacing the value with poison)
+  // instead of failing instruction selection. Both callers - operation
+  // legalization and the pre-ISel combine - replace the node with this result,
+  // so the diagnostic is emitted exactly once.
+  auto reportUnsupported = [&]() -> SDValue {
+    const Function &F = DAG.getMachineFunction().getFunction();
+    DAG.getContext()->diagnose(DiagnosticInfoUnsupported(
+        F,
+        "unsupported access of VGPR 'as memory' address space (13); only "
+        "whole-dword loads and stores are implemented",
+        DL.getDebugLoc()));
+    if (isa<StoreSDNode>(MemOp))
+      return MemOp->getChain();
+    return DAG.getMergeValues(
+        {DAG.getPOISON(Op.getValueType()), MemOp->getChain()}, DL);
+  };
+
+  if (BitWidth < 32 || BitWidth % 32 != 0)
+    return reportUnsupported();
+  if (auto *Load = dyn_cast<LoadSDNode>(MemOp)) {
+    if (Load->getExtensionType() != ISD::NON_EXTLOAD)
+      return reportUnsupported();
+  } else if (cast<StoreSDNode>(MemOp)->isTruncatingStore()) {
+    return reportUnsupported();
+  }
+
+  SDValue Chain = MemOp->getChain();
+  SDValue Index = DAG.getNode(ISD::SRL, DL, MVT::i32, MemOp->getBasePtr(),
+                              DAG.getConstant(2, DL, MVT::i32));
+
+  // View the access as i32 / <N x i32> when the memory type is not register
+  // legal (e.g. v4i8), bitcasting the value across.
+  EVT RegVT = MemVT;
+  if (!isTypeLegal(RegVT)) {
+    unsigned NumDwords = BitWidth / 32;
+    RegVT = NumDwords == 1
+                ? EVT(MVT::i32)
+                : EVT::getVectorVT(*DAG.getContext(), MVT::i32, NumDwords);
+  }
+
+  if (auto *StoreOp = dyn_cast<StoreSDNode>(MemOp)) {
+    SDValue Value = StoreOp->getValue();
+    if (RegVT != MemVT)
+      Value = DAG.getNode(ISD::BITCAST, DL, RegVT, Value);
+    return DAG.getMemIntrinsicNode(
+        AMDGPUISD::REG_STORE, DL, DAG.getVTList(MVT::Other),
+        {Chain, Value, Index}, MemVT, StoreOp->getMemOperand());
+  }
+
+  auto *LoadOp = cast<LoadSDNode>(MemOp);
+  SDValue NewLoad = DAG.getMemIntrinsicNode(
+      AMDGPUISD::REG_LOAD, DL, DAG.getVTList(RegVT, MVT::Other), {Chain, Index},
+      MemVT, LoadOp->getMemOperand());
+  if (RegVT == MemVT)
+    return NewLoad;
+  SDValue Value = DAG.getNode(ISD::BITCAST, DL, MemVT, NewLoad);
+  return DAG.getMergeValues({Value, NewLoad.getValue(1)}, DL);
+}
+
 SDValue SITargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DL(Op);
   LoadSDNode *Load = cast<LoadSDNode>(Op);
   ISD::LoadExtType ExtType = Load->getExtensionType();
   EVT MemVT = Load->getMemoryVT();
   MachineMemOperand *MMO = Load->getMemOperand();
+
+  if (Load->getAddressSpace() == AMDGPUAS::VGPR)
+    return LowerLoadStoreVGPR(Op, DAG);
 
   if (ExtType == ISD::NON_EXTLOAD && MemVT.getSizeInBits() < 32) {
     if (MemVT == MVT::i16 && isTypeLegal(MVT::i16))
@@ -13788,6 +13866,9 @@ SDValue SITargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DL(Op);
   StoreSDNode *Store = cast<StoreSDNode>(Op);
   EVT VT = Store->getMemoryVT();
+
+  if (Store->getAddressSpace() == AMDGPUAS::VGPR)
+    return LowerLoadStoreVGPR(Op, DAG);
 
   if (VT == MVT::i1) {
     return DAG.getTruncStore(
@@ -18598,6 +18679,19 @@ SDValue SITargetLowering::PerformDAGCombine(SDNode *N,
     if (auto Res = promoteUniformOpToI32(SDValue(N, 0), DCI))
       return Res;
     break;
+  case ISD::LOAD:
+    // Lower a VGPR ("as memory") address space (13) load to a REG_LOAD target
+    // node. Done here (not via operation legalization) so it also fires at -O0,
+    // where a scalar load is otherwise Legal and never reaches LowerLOAD.
+    if (cast<LoadSDNode>(N)->getAddressSpace() == AMDGPUAS::VGPR)
+      if (SDValue V = LowerLoadStoreVGPR(SDValue(N, 0), DCI.DAG))
+        return V;
+    break;
+  case ISD::STORE:
+    if (cast<StoreSDNode>(N)->getAddressSpace() == AMDGPUAS::VGPR)
+      if (SDValue V = LowerLoadStoreVGPR(SDValue(N, 0), DCI.DAG))
+        return V;
+    break;
   default:
     break;
   }
@@ -19194,6 +19288,24 @@ void SITargetLowering::AdjustInstrPostInstrSelection(MachineInstr &MI,
       }
     }
 
+    return;
+  }
+
+  // A VGPR "as memory" indexed load/store with a register index expands (on
+  // movrel subtargets) to an M0-relative move. Add an implicit-def of $m0: it
+  // records that the eventual move clobbers M0, and - because an instruction
+  // defining a physical register is not hoisted/sunk - keeps a divergent access
+  // pinned inside its waterfall loop. AMDGPUAssignIdxToM0 removes this when it
+  // writes M0 for real.
+  if (SIInstrInfo::isVGPRIdxLoadStore(MI.getOpcode()) &&
+      getSubtarget()->hasMovrel()) {
+    // Record that this function performs a VGPR "as memory" access so
+    // AMDGPUAssignIdxToM0 can skip its scan otherwise.
+    MF->getInfo<SIMachineFunctionInfo>()->setHasVGPRAsMemoryAccess();
+    const MachineOperand *Idx = TII->getNamedOperand(MI, AMDGPU::OpName::idx);
+    if (Idx && Idx->isReg())
+      MI.addOperand(MachineOperand::CreateReg(AMDGPU::M0, /*isDef=*/true,
+                                              /*isImp=*/true));
     return;
   }
 
