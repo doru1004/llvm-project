@@ -64,6 +64,17 @@ bool isVGPRLoadStoreSupported(unsigned MemSize, unsigned ValSize,
   return AMDGPUMI::VLoadIdxInst::tryGetOpcodeForBitWidth(MemSize) != -1;
 }
 
+std::optional<int64_t>
+getFoldableVGPRDwordOffset(int64_t ByteOffset, unsigned NumDwords,
+                           unsigned NumAddressableVGPRs) {
+  if (ByteOffset < 0)
+    return std::nullopt;
+  int64_t DwordOffset = ByteOffset / 4;
+  if (DwordOffset + NumDwords > NumAddressableVGPRs)
+    return std::nullopt;
+  return DwordOffset;
+}
+
 bool AllocatedVGPRsMetadata::classof(const MDNode *N) {
   if (N->getNumOperands() != 2)
     return false;

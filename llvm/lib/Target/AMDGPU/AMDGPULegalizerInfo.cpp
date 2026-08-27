@@ -3572,9 +3572,13 @@ static bool lowerLoadStoreVGPR(LegalizerHelper &Helper, MachineInstr &MI) {
       }
     }
 
+    // A dword-aligned access reached through a dword-sized constant offset has
+    // a dword-aligned base, which the value tracking below cannot see for
+    // itself: the alignment is a property of the memory operand rather than of
+    // the value.
     bool HaveConstantBitOffset = false;
     int64_t ConstantBitOffsetVal = 0;
-    if (Offset == 0 && MMO.getAlign() >= Align(4)) {
+    if (MMO.getAlign() >= Align(4) && Offset % 4 == 0) {
       HaveConstantBitOffset = true;
       ConstantBitOffsetVal = 0;
     } else {
@@ -3590,7 +3594,33 @@ static bool lowerLoadStoreVGPR(LegalizerHelper &Helper, MachineInstr &MI) {
     // Setup common registers.
     const MachineInstrBuilder PtrAsInt = B.buildPtrToInt(I32, PtrReg);
     MachineInstrBuilder Two = B.buildConstant(I32, 2);
-    const MachineInstrBuilder Index = B.buildLShr(I32, PtrAsInt, Two);
+
+    // Where the base's low two bits are known, form the dword index as
+    // (base >> 2) + offset/4 rather than (base + offset) >> 2, so that a
+    // constant dword offset folds into the pseudo's $offset operand instead of
+    // costing an add and a fresh index per access. Offset already carries the
+    // base's low bits, which is what makes the two halves line up: the bit
+    // offset above takes Offset % 4 and the dword index here takes Offset / 4.
+    const MachineFunction &MF = B.getMF();
+    const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
+    unsigned NumAddressableVGPRs =
+        MF.getSubtarget<GCNSubtarget>().getAddressableNumVGPRs(
+            MFI->getDynamicVGPRBlockSize());
+
+    const MachineInstrBuilder Index = [&] {
+      std::optional<int64_t> FoldedOffset =
+          HaveConstantBitOffset && BaseReg != PtrReg
+              ? AMDGPU::getFoldableVGPRDwordOffset(Offset, /*NumDwords=*/1,
+                                                   NumAddressableVGPRs)
+              : std::nullopt;
+      if (!FoldedOffset)
+        return B.buildLShr(I32, PtrAsInt, Two);
+      MachineInstrBuilder Base =
+          B.buildLShr(I32, B.buildPtrToInt(I32, BaseReg), Two);
+      if (*FoldedOffset)
+        return B.buildAdd(I32, Base, B.buildConstant(I32, *FoldedOffset));
+      return Base;
+    }();
 
     const MachineInstrBuilder BitWidthReg = B.buildConstant(I32, MemSize);
     Register BitOffsetReg;
@@ -3651,9 +3681,41 @@ static bool lowerLoadStoreVGPR(LegalizerHelper &Helper, MachineInstr &MI) {
     return true;
   }
 
-  const MachineInstrBuilder PtrAsInt = B.buildPtrToInt(I32, PtrReg);
   MachineInstrBuilder Two = B.buildConstant(I32, 2);
-  const MachineInstrBuilder Index = B.buildLShr(I32, PtrAsInt, Two);
+
+  // Form the dword index as (base >> 2) + offset/4 rather than
+  // (base + offset) >> 2, so that a constant dword offset folds into the
+  // pseudo's $offset operand instead of costing an add and a fresh index per
+  // access. The rewrite needs the low two bits of the base to be zero, which a
+  // byte offset that is a multiple of four gives, since the access as a whole
+  // is dword aligned - checked above.
+  const MachineFunction &MF = B.getMF();
+  const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
+  unsigned NumAddressableVGPRs =
+      MF.getSubtarget<GCNSubtarget>().getAddressableNumVGPRs(
+          MFI->getDynamicVGPRBlockSize());
+
+  const MachineInstrBuilder Index = [&] {
+    if (auto *PtrAdd = getOpcodeDef<GPtrAdd>(PtrReg, MRI)) {
+      if (std::optional<ValueAndVReg> MaybeOff =
+              getIConstantVRegValWithLookThrough(PtrAdd->getOffsetReg(), MRI)) {
+        int64_t ByteOffset = MaybeOff->Value.getSExtValue();
+        std::optional<int64_t> Folded =
+            ByteOffset % 4 == 0
+                ? AMDGPU::getFoldableVGPRDwordOffset(ByteOffset, ValSize / 32,
+                                                     NumAddressableVGPRs)
+                : std::nullopt;
+        if (Folded) {
+          MachineInstrBuilder Base =
+              B.buildLShr(I32, B.buildPtrToInt(I32, PtrAdd->getBaseReg()), Two);
+          if (*Folded)
+            return B.buildAdd(I32, Base, B.buildConstant(I32, *Folded));
+          return Base;
+        }
+      }
+    }
+    return B.buildLShr(I32, B.buildPtrToInt(I32, PtrReg), Two);
+  }();
 
   // Normalize the value to i32 / <N x i32> so a selection pattern always
   // exists (e.g. for v4i8).

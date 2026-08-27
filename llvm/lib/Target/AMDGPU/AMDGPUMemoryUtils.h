@@ -147,6 +147,29 @@ public:
 bool isVGPRLoadStoreSupported(unsigned MemSize, unsigned ValSize,
                               Align Alignment);
 
+/// The dword offset to fold into a VGPR ("as memory") indexed access's $offset
+/// operand, where it costs nothing: it names a different base register for the
+/// move rather than an addition. Returns std::nullopt to keep the dynamic form.
+///
+/// \p ByteOffset is the constant part of the address, and \p NumDwords is how
+/// many registers the access spans, which the offset has to leave room for.
+///
+/// Takes the byte offset rather than the dword one so that the division and the
+/// sign test happen together: -2 bytes is not a foldable zero-dword offset, but
+/// truncating division makes it look like one.
+///
+/// Access outside the register file is undefined behaviour rather than
+/// something to reject, but folding a wild offset would move the problem into
+/// an operand the encoding cannot represent - turning a program that merely
+/// misbehaves at run time into one that cannot be compiled. Those keep the
+/// dynamic index instead.
+///
+/// Both selectors and both access widths decide this the same way, so they ask
+/// here rather than each spelling out the bound.
+std::optional<int64_t> getFoldableVGPRDwordOffset(int64_t ByteOffset,
+                                                  unsigned NumDwords,
+                                                  unsigned NumAddressableVGPRs);
+
 } // end namespace AMDGPU
 
 } // end namespace llvm

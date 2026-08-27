@@ -13602,8 +13602,11 @@ SDValue SITargetLowering::LowerLoadStoreVGPR(SDValue Op,
 
     // Determine the bit-offset, optimizing the case where the LSBs are
     // constant.
+    // A dword-aligned access reached through a dword-sized constant offset has
+    // a dword-aligned base, which computeKnownBits cannot see for itself: the
+    // alignment is a property of the memory operand rather than of the value.
     KnownBits BaseKB;
-    if (Offset == 0 && MemOp->getAlign() >= Align(4)) {
+    if (MemOp->getAlign() >= Align(4) && Offset % 4 == 0) {
       BaseKB = KnownBits::makeConstant(APInt::getZero(2));
     } else {
       BaseKB = DAG.computeKnownBits(Base).trunc(2);
@@ -13620,8 +13623,33 @@ SDValue SITargetLowering::LowerLoadStoreVGPR(SDValue Op,
                               DAG.getConstant(3, DL, MVT::i32));
     }
 
-    SDValue Index = DAG.getNode(ISD::SRL, DL, MVT::i32, Ptr,
-                                DAG.getConstant(2, DL, MVT::i32));
+    // Where the base's low two bits are known, the dword index can be formed as
+    // (base >> 2) + offset/4 rather than (base + offset) >> 2, which lets a
+    // constant dword offset fold into the pseudo's $offset operand instead of
+    // costing an add and a fresh index per access. Offset already carries the
+    // base's low bits, which is what makes the two halves line up: the bit
+    // offset above takes Offset % 4 and the dword index here takes Offset / 4.
+    const SIMachineFunctionInfo *MFI =
+        DAG.getMachineFunction().getInfo<SIMachineFunctionInfo>();
+    unsigned NumAddressableVGPRs =
+        Subtarget->getAddressableNumVGPRs(MFI->getDynamicVGPRBlockSize());
+
+    std::optional<int64_t> FoldedOffset =
+        BaseKB.isConstant() ? AMDGPU::getFoldableVGPRDwordOffset(
+                                  Offset, /*NumDwords=*/1, NumAddressableVGPRs)
+                            : std::nullopt;
+
+    SDValue Index;
+    if (FoldedOffset) {
+      Index = DAG.getNode(ISD::SRL, DL, MVT::i32, Base,
+                          DAG.getConstant(2, DL, MVT::i32));
+      if (*FoldedOffset)
+        Index = DAG.getNode(ISD::ADD, DL, MVT::i32, Index,
+                            DAG.getConstant(*FoldedOffset, DL, MVT::i32));
+    } else {
+      Index = DAG.getNode(ISD::SRL, DL, MVT::i32, Ptr,
+                          DAG.getConstant(2, DL, MVT::i32));
+    }
     SDValue BitSizeImm = DAG.getConstant(BitWidth, DL, MVT::i32);
     SDValue Chain = MemOp->getChain();
 
@@ -13692,8 +13720,43 @@ SDValue SITargetLowering::LowerLoadStoreVGPR(SDValue Op,
   }
 
   SDValue Chain = MemOp->getChain();
-  SDValue Index = DAG.getNode(ISD::SRL, DL, MVT::i32, MemOp->getBasePtr(),
+
+  // Form the dword index as (base >> 2) + offset/4 rather than (base + offset)
+  // >> 2, so that a constant dword offset folds into the pseudo's $offset
+  // operand instead of costing an add and a fresh index per access.
+  //
+  // The rewrite needs the low two bits of the base to be zero. A byte offset
+  // that is a multiple of four gives that, since the access as a whole is
+  // dword aligned - checked just above.
+  //
+  // The offset also has to stay in range. Out-of-bounds access of the region is
+  // undefined behaviour, and folding a wild offset into $offset would turn a
+  // program that merely misbehaves at run time into one the encoding pass
+  // cannot represent, so leave those to the original dynamic form.
+  SDValue Ptr = MemOp->getBasePtr();
+  SDValue IdxBase = Ptr;
+  int64_t DwordOffset = 0;
+  if (DAG.isBaseWithConstantOffset(Ptr)) {
+    int64_t ByteOffset =
+        cast<ConstantSDNode>(Ptr.getOperand(1))->getSExtValue();
+    const SIMachineFunctionInfo *MFI =
+        DAG.getMachineFunction().getInfo<SIMachineFunctionInfo>();
+    unsigned NumAddressableVGPRs =
+        Subtarget->getAddressableNumVGPRs(MFI->getDynamicVGPRBlockSize());
+    if (ByteOffset % 4 == 0) {
+      if (std::optional<int64_t> Folded = AMDGPU::getFoldableVGPRDwordOffset(
+              ByteOffset, BitWidth / 32, NumAddressableVGPRs)) {
+        IdxBase = Ptr.getOperand(0);
+        DwordOffset = *Folded;
+      }
+    }
+  }
+
+  SDValue Index = DAG.getNode(ISD::SRL, DL, MVT::i32, IdxBase,
                               DAG.getConstant(2, DL, MVT::i32));
+  if (DwordOffset != 0)
+    Index = DAG.getNode(ISD::ADD, DL, MVT::i32, Index,
+                        DAG.getConstant(DwordOffset, DL, MVT::i32));
 
   // View the access as i32 / <N x i32> when the memory type is not register
   // legal (e.g. v4i8), bitcasting the value across.
