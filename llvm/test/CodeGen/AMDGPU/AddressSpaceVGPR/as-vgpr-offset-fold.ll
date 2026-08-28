@@ -612,3 +612,438 @@ define i32 @byte_at_minus_two(ptr addrspace(13) inreg %p) {
   %e = zext i8 %x to i32
   ret i32 %e
 }
+
+; A wholly constant address - which is what an object at a known place, accessed
+; at a known element, produces - needs no index at all. Keeping the index at zero
+; lets all three accesses share one write of M0 instead of rewriting it per
+; access, with the dword offset naming the base register.
+define void @constant_addresses(i32 %a, i32 %b, i32 %c) {
+; GFX12-LABEL: constant_addresses:
+; GFX12:       ; %bb.0:
+; GFX12-NEXT:    s_wait_loadcnt_dscnt 0x0
+; GFX12-NEXT:    s_wait_expcnt 0x0
+; GFX12-NEXT:    s_wait_samplecnt 0x0
+; GFX12-NEXT:    s_wait_bvhcnt 0x0
+; GFX12-NEXT:    s_wait_kmcnt 0x0
+; GFX12-NEXT:    s_mov_b32 m0, 0
+; GFX12-NEXT:    v_movreld_b32_e32 v0, v0
+; GFX12-NEXT:    v_movreld_b32_e32 v5, v1
+; GFX12-NEXT:    v_movreld_b32_e32 v10, v2
+; GFX12-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX942-LABEL: constant_addresses:
+; GFX942:       ; %bb.0:
+; GFX942-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX942-NEXT:    s_mov_b32 s0, 0
+; GFX942-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-NEXT:    v_mov_b32_e32 v0, v0
+; GFX942-NEXT:    s_set_gpr_idx_off
+; GFX942-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-NEXT:    v_mov_b32_e32 v5, v1
+; GFX942-NEXT:    s_set_gpr_idx_off
+; GFX942-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-NEXT:    v_mov_b32_e32 v10, v2
+; GFX942-NEXT:    s_set_gpr_idx_off
+; GFX942-NEXT:    s_setpc_b64 s[30:31]
+  %p0 = inttoptr i32 0  to ptr addrspace(13)
+  %p1 = inttoptr i32 20 to ptr addrspace(13)
+  %p2 = inttoptr i32 40 to ptr addrspace(13)
+  store volatile i32 %a, ptr addrspace(13) %p0, align 4
+  store volatile i32 %b, ptr addrspace(13) %p1, align 4
+  store volatile i32 %c, ptr addrspace(13) %p2, align 4
+  ret void
+}
+
+; Whole-dword and sub-dword accesses have to agree about this. M0 holds one
+; value at a time, so if only one of the two forms used a zero index a function
+; mixing them would rewrite M0 back and forth and end up worse off than before.
+define void @constant_addresses_mixed(i32 %a, i8 %b, i32 %c) {
+; GFX12-SDAG-LABEL: constant_addresses_mixed:
+; GFX12-SDAG:       ; %bb.0:
+; GFX12-SDAG-NEXT:    s_wait_loadcnt_dscnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_expcnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_samplecnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_bvhcnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_kmcnt 0x0
+; GFX12-SDAG-NEXT:    s_mov_b32 m0, 0
+; GFX12-SDAG-NEXT:    v_movreld_b32_e32 v0, v0
+; GFX12-SDAG-NEXT:    v_mov_b16_e32 v0.l, v1.l
+; GFX12-SDAG-NEXT:    v_movrels_b32_e32 v1, v5
+; GFX12-SDAG-NEXT:    s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+; GFX12-SDAG-NEXT:    v_bfi_b32 v0, 0xff, v0, v1
+; GFX12-SDAG-NEXT:    v_movreld_b32_e32 v5, v0
+; GFX12-SDAG-NEXT:    v_movreld_b32_e32 v10, v2
+; GFX12-SDAG-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX12-GISEL-LABEL: constant_addresses_mixed:
+; GFX12-GISEL:       ; %bb.0:
+; GFX12-GISEL-NEXT:    s_wait_loadcnt_dscnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_expcnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_samplecnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_bvhcnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_kmcnt 0x0
+; GFX12-GISEL-NEXT:    s_mov_b32 m0, 0
+; GFX12-GISEL-NEXT:    v_movreld_b32_e32 v0, v0
+; GFX12-GISEL-NEXT:    v_movrels_b32_e32 v0, v5
+; GFX12-GISEL-NEXT:    s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+; GFX12-GISEL-NEXT:    v_bfi_b32 v0, 0xff, v1, v0
+; GFX12-GISEL-NEXT:    v_movreld_b32_e32 v5, v0
+; GFX12-GISEL-NEXT:    v_movreld_b32_e32 v10, v2
+; GFX12-GISEL-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX942-SDAG-LABEL: constant_addresses_mixed:
+; GFX942-SDAG:       ; %bb.0:
+; GFX942-SDAG-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX942-SDAG-NEXT:    s_mov_b32 s0, 0
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v0, v0
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:    s_movk_i32 s1, 0xff
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s0, gpr_idx(SRC0)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v0, v5
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:    v_bfi_b32 v0, s1, v1, v0
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v5, v0
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v10, v2
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX942-GISEL-LABEL: constant_addresses_mixed:
+; GFX942-GISEL:       ; %bb.0:
+; GFX942-GISEL-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX942-GISEL-NEXT:    s_mov_b32 s0, 0
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v0, v0
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v0, 0xff
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s0, gpr_idx(SRC0)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v3, v5
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:    v_bfi_b32 v0, v0, v1, v3
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v5, v0
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v10, v2
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:    s_setpc_b64 s[30:31]
+  %p0 = inttoptr i32 0  to ptr addrspace(13)
+  %p1 = inttoptr i32 20 to ptr addrspace(13)
+  %p2 = inttoptr i32 40 to ptr addrspace(13)
+  store volatile i32 %a, ptr addrspace(13) %p0, align 4
+  store volatile i8 %b, ptr addrspace(13) %p1, align 4
+  store volatile i32 %c, ptr addrspace(13) %p2, align 4
+  ret void
+}
+
+; A constant address past the register file has to keep its index in M0 for the
+; same reason an out-of-range offset does: the access is out of bounds either
+; way, but $offset cannot represent it, and putting it there fails to compile
+; rather than merely misbehaving at run time.
+define void @constant_address_past_the_file(i32 %a) {
+; GFX12-LABEL: constant_address_past_the_file:
+; GFX12:       ; %bb.0:
+; GFX12-NEXT:    s_wait_loadcnt_dscnt 0x0
+; GFX12-NEXT:    s_wait_expcnt 0x0
+; GFX12-NEXT:    s_wait_samplecnt 0x0
+; GFX12-NEXT:    s_wait_bvhcnt 0x0
+; GFX12-NEXT:    s_wait_kmcnt 0x0
+; GFX12-NEXT:    s_mov_b32 m0, 0x186a0
+; GFX12-NEXT:    v_movreld_b32_e32 v0, v0
+; GFX12-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX942-LABEL: constant_address_past_the_file:
+; GFX942:       ; %bb.0:
+; GFX942-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX942-NEXT:    s_mov_b32 s0, 0x186a0
+; GFX942-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-NEXT:    v_mov_b32_e32 v0, v0
+; GFX942-NEXT:    s_set_gpr_idx_off
+; GFX942-NEXT:    s_setpc_b64 s[30:31]
+  %p = inttoptr i32 400000 to ptr addrspace(13)
+  store volatile i32 %a, ptr addrspace(13) %p, align 4
+  ret void
+}
+
+; A sub-dword access at a constant address past the file, which reaches the
+; bound through the other pattern family.
+define void @constant_byte_past_the_file(i8 %a) {
+; GFX12-LABEL: constant_byte_past_the_file:
+; GFX12:       ; %bb.0:
+; GFX12-NEXT:    s_wait_loadcnt_dscnt 0x0
+; GFX12-NEXT:    s_wait_expcnt 0x0
+; GFX12-NEXT:    s_wait_samplecnt 0x0
+; GFX12-NEXT:    s_wait_bvhcnt 0x0
+; GFX12-NEXT:    s_wait_kmcnt 0x0
+; GFX12-NEXT:    s_mov_b32 m0, 0x186a0
+; GFX12-NEXT:    v_movrels_b32_e32 v1, v0
+; GFX12-NEXT:    s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+; GFX12-NEXT:    v_bfi_b32 v0, 0xff, v0, v1
+; GFX12-NEXT:    v_movreld_b32_e32 v0, v0
+; GFX12-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX942-SDAG-LABEL: constant_byte_past_the_file:
+; GFX942-SDAG:       ; %bb.0:
+; GFX942-SDAG-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX942-SDAG-NEXT:    s_mov_b32 s1, 0x186a0
+; GFX942-SDAG-NEXT:    s_movk_i32 s0, 0xff
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s1, gpr_idx(SRC0)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v1, v0
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:    v_bfi_b32 v0, s0, v0, v1
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s1, gpr_idx(DST)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v0, v0
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX942-GISEL-LABEL: constant_byte_past_the_file:
+; GFX942-GISEL:       ; %bb.0:
+; GFX942-GISEL-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX942-GISEL-NEXT:    s_mov_b32 s0, 0x186a0
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v1, 0xff
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s0, gpr_idx(SRC0)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v2, v0
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:    v_bfi_b32 v0, v1, v0, v2
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v0, v0
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:    s_setpc_b64 s[30:31]
+  %p = inttoptr i32 400000 to ptr addrspace(13)
+  store volatile i8 %a, ptr addrspace(13) %p, align 4
+  ret void
+}
+
+; Giving constant-address accesses a shared zero index makes M0 a value that
+; lives across blocks, which it did not before: every access used to carry its
+; own constant. What keeps that correct is that the redundant-write elimination
+; is path-sensitive, and these two shapes are where a naive version would be
+; wrong. Neither is exercised by the cases above, and a regression in either
+; would be a silently wrong register rather than a failure to build.
+;
+; Here one path clobbers M0 with a dynamic index, so the join block has to write
+; it again even though the entry block already set it to zero.
+define void @m0_clobbered_on_one_path(i32 %a, i32 %b, i32 inreg %dyn, i1 %c) {
+; GFX12-SDAG-LABEL: m0_clobbered_on_one_path:
+; GFX12-SDAG:       ; %bb.0: ; %entry
+; GFX12-SDAG-NEXT:    s_wait_loadcnt_dscnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_expcnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_samplecnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_bvhcnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_kmcnt 0x0
+; GFX12-SDAG-NEXT:    v_and_b32_e32 v2, 1, v2
+; GFX12-SDAG-NEXT:    s_mov_b32 m0, 0
+; GFX12-SDAG-NEXT:    s_mov_b32 s1, exec_lo
+; GFX12-SDAG-NEXT:    v_movreld_b32_e32 v5, v0
+; GFX12-SDAG-NEXT:    s_delay_alu instid0(VALU_DEP_2)
+; GFX12-SDAG-NEXT:    v_cmpx_eq_u32_e32 1, v2
+; GFX12-SDAG-NEXT:  ; %bb.1: ; %then
+; GFX12-SDAG-NEXT:    s_mov_b32 m0, s0
+; GFX12-SDAG-NEXT:    v_movreld_b32_e32 v0, v1
+; GFX12-SDAG-NEXT:  ; %bb.2: ; %join
+; GFX12-SDAG-NEXT:    s_wait_alu depctr_sa_sdst(0)
+; GFX12-SDAG-NEXT:    s_or_b32 exec_lo, exec_lo, s1
+; GFX12-SDAG-NEXT:    s_mov_b32 m0, 0
+; GFX12-SDAG-NEXT:    v_movreld_b32_e32 v5, v0
+; GFX12-SDAG-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX12-GISEL-LABEL: m0_clobbered_on_one_path:
+; GFX12-GISEL:       ; %bb.0: ; %entry
+; GFX12-GISEL-NEXT:    s_wait_loadcnt_dscnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_expcnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_samplecnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_bvhcnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_kmcnt 0x0
+; GFX12-GISEL-NEXT:    v_and_b32_e32 v2, 1, v2
+; GFX12-GISEL-NEXT:    s_mov_b32 m0, 0
+; GFX12-GISEL-NEXT:    s_mov_b32 s1, exec_lo
+; GFX12-GISEL-NEXT:    v_movreld_b32_e32 v5, v0
+; GFX12-GISEL-NEXT:    s_delay_alu instid0(VALU_DEP_2)
+; GFX12-GISEL-NEXT:    v_cmpx_ne_u32_e32 0, v2
+; GFX12-GISEL-NEXT:  ; %bb.1: ; %then
+; GFX12-GISEL-NEXT:    s_bfe_u32 m0, s0, 0x1e0000
+; GFX12-GISEL-NEXT:    v_movreld_b32_e32 v0, v1
+; GFX12-GISEL-NEXT:  ; %bb.2: ; %join
+; GFX12-GISEL-NEXT:    s_wait_alu depctr_sa_sdst(0)
+; GFX12-GISEL-NEXT:    s_or_b32 exec_lo, exec_lo, s1
+; GFX12-GISEL-NEXT:    s_mov_b32 m0, 0
+; GFX12-GISEL-NEXT:    v_movreld_b32_e32 v5, v0
+; GFX12-GISEL-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX942-SDAG-LABEL: m0_clobbered_on_one_path:
+; GFX942-SDAG:       ; %bb.0: ; %entry
+; GFX942-SDAG-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX942-SDAG-NEXT:    v_and_b32_e32 v2, 1, v2
+; GFX942-SDAG-NEXT:    v_cmp_eq_u32_e32 vcc, 1, v2
+; GFX942-SDAG-NEXT:    s_mov_b32 s1, 0
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s1, gpr_idx(DST)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v5, v0
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:    s_and_saveexec_b64 s[2:3], vcc
+; GFX942-SDAG-NEXT:  ; %bb.1: ; %then
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v0, v1
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:  ; %bb.2: ; %join
+; GFX942-SDAG-NEXT:    s_or_b64 exec, exec, s[2:3]
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s1, gpr_idx(DST)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v5, v0
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX942-GISEL-LABEL: m0_clobbered_on_one_path:
+; GFX942-GISEL:       ; %bb.0: ; %entry
+; GFX942-GISEL-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX942-GISEL-NEXT:    v_and_b32_e32 v2, 1, v2
+; GFX942-GISEL-NEXT:    v_cmp_ne_u32_e32 vcc, 0, v2
+; GFX942-GISEL-NEXT:    s_mov_b32 s1, 0
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s1, gpr_idx(DST)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v5, v0
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:    s_and_saveexec_b64 s[2:3], vcc
+; GFX942-GISEL-NEXT:  ; %bb.1: ; %then
+; GFX942-GISEL-NEXT:    s_bfe_u32 s0, s0, 0x1e0000
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s0, gpr_idx(DST)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v0, v1
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:  ; %bb.2: ; %join
+; GFX942-GISEL-NEXT:    s_or_b64 exec, exec, s[2:3]
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s1, gpr_idx(DST)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v5, v0
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:    s_setpc_b64 s[30:31]
+entry:
+  %p0 = inttoptr i32 20 to ptr addrspace(13)
+  %pd = inttoptr i32 0  to ptr addrspace(13)
+  store volatile i32 %a, ptr addrspace(13) %p0, align 4
+  br i1 %c, label %then, label %join
+then:
+  %q = getelementptr i32, ptr addrspace(13) %pd, i32 %dyn
+  store volatile i32 %b, ptr addrspace(13) %q, align 4
+  br label %join
+join:
+  store volatile i32 %a, ptr addrspace(13) %p0, align 4
+  ret void
+}
+
+; And here the loop body clobbers M0, so the write at the top cannot be hoisted
+; out: the back edge arrives holding the previous iteration's dynamic index.
+define void @m0_clobbered_in_loop(i32 %a, i32 %b, i32 inreg %dyn, i32 %n) {
+; GFX12-SDAG-LABEL: m0_clobbered_in_loop:
+; GFX12-SDAG:       ; %bb.0: ; %entry
+; GFX12-SDAG-NEXT:    s_wait_loadcnt_dscnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_expcnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_samplecnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_bvhcnt 0x0
+; GFX12-SDAG-NEXT:    s_wait_kmcnt 0x0
+; GFX12-SDAG-NEXT:    s_lshl_b32 s1, s0, 2
+; GFX12-SDAG-NEXT:    s_mov_b32 s0, 0
+; GFX12-SDAG-NEXT:    s_wait_alu depctr_sa_sdst(0)
+; GFX12-SDAG-NEXT:    s_lshr_b32 s1, s1, 2
+; GFX12-SDAG-NEXT:  .LBB15_1: ; %loop
+; GFX12-SDAG-NEXT:    ; =>This Inner Loop Header: Depth=1
+; GFX12-SDAG-NEXT:    v_add_nc_u32_e32 v2, -1, v2
+; GFX12-SDAG-NEXT:    s_mov_b32 m0, 0
+; GFX12-SDAG-NEXT:    v_movreld_b32_e32 v5, v0
+; GFX12-SDAG-NEXT:    s_wait_alu depctr_sa_sdst(0)
+; GFX12-SDAG-NEXT:    s_mov_b32 m0, s1
+; GFX12-SDAG-NEXT:    v_cmp_eq_u32_e32 vcc_lo, 0, v2
+; GFX12-SDAG-NEXT:    v_movreld_b32_e32 v0, v1
+; GFX12-SDAG-NEXT:    s_or_b32 s0, vcc_lo, s0
+; GFX12-SDAG-NEXT:    s_wait_alu depctr_sa_sdst(0)
+; GFX12-SDAG-NEXT:    s_and_not1_b32 exec_lo, exec_lo, s0
+; GFX12-SDAG-NEXT:    s_cbranch_execnz .LBB15_1
+; GFX12-SDAG-NEXT:  ; %bb.2: ; %exit
+; GFX12-SDAG-NEXT:    s_or_b32 exec_lo, exec_lo, s0
+; GFX12-SDAG-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX12-GISEL-LABEL: m0_clobbered_in_loop:
+; GFX12-GISEL:       ; %bb.0: ; %entry
+; GFX12-GISEL-NEXT:    s_wait_loadcnt_dscnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_expcnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_samplecnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_bvhcnt 0x0
+; GFX12-GISEL-NEXT:    s_wait_kmcnt 0x0
+; GFX12-GISEL-NEXT:    s_mov_b32 s1, 0
+; GFX12-GISEL-NEXT:  .LBB15_1: ; %loop
+; GFX12-GISEL-NEXT:    ; =>This Inner Loop Header: Depth=1
+; GFX12-GISEL-NEXT:    v_add_nc_u32_e32 v2, -1, v2
+; GFX12-GISEL-NEXT:    s_mov_b32 m0, 0
+; GFX12-GISEL-NEXT:    v_movreld_b32_e32 v5, v0
+; GFX12-GISEL-NEXT:    s_bfe_u32 m0, s0, 0x1e0000
+; GFX12-GISEL-NEXT:    s_delay_alu instid0(VALU_DEP_2)
+; GFX12-GISEL-NEXT:    v_cmp_eq_u32_e32 vcc_lo, 0, v2
+; GFX12-GISEL-NEXT:    v_movreld_b32_e32 v0, v1
+; GFX12-GISEL-NEXT:    s_wait_alu depctr_sa_sdst(0)
+; GFX12-GISEL-NEXT:    s_or_b32 s1, vcc_lo, s1
+; GFX12-GISEL-NEXT:    s_wait_alu depctr_sa_sdst(0)
+; GFX12-GISEL-NEXT:    s_and_not1_b32 exec_lo, exec_lo, s1
+; GFX12-GISEL-NEXT:    s_cbranch_execnz .LBB15_1
+; GFX12-GISEL-NEXT:  ; %bb.2: ; %exit
+; GFX12-GISEL-NEXT:    s_or_b32 exec_lo, exec_lo, s1
+; GFX12-GISEL-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX942-SDAG-LABEL: m0_clobbered_in_loop:
+; GFX942-SDAG:       ; %bb.0: ; %entry
+; GFX942-SDAG-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX942-SDAG-NEXT:    s_lshl_b32 s3, s0, 2
+; GFX942-SDAG-NEXT:    s_mov_b64 s[0:1], 0
+; GFX942-SDAG-NEXT:    s_mov_b32 s2, 0
+; GFX942-SDAG-NEXT:    s_lshr_b32 s3, s3, 2
+; GFX942-SDAG-NEXT:  .LBB15_1: ; %loop
+; GFX942-SDAG-NEXT:    ; =>This Inner Loop Header: Depth=1
+; GFX942-SDAG-NEXT:    v_add_u32_e32 v2, -1, v2
+; GFX942-SDAG-NEXT:    v_cmp_eq_u32_e32 vcc, 0, v2
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s2, gpr_idx(DST)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v5, v0
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:    s_or_b64 s[0:1], vcc, s[0:1]
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_on s3, gpr_idx(DST)
+; GFX942-SDAG-NEXT:    v_mov_b32_e32 v0, v1
+; GFX942-SDAG-NEXT:    s_set_gpr_idx_off
+; GFX942-SDAG-NEXT:    s_andn2_b64 exec, exec, s[0:1]
+; GFX942-SDAG-NEXT:    s_cbranch_execnz .LBB15_1
+; GFX942-SDAG-NEXT:  ; %bb.2: ; %exit
+; GFX942-SDAG-NEXT:    s_or_b64 exec, exec, s[0:1]
+; GFX942-SDAG-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX942-GISEL-LABEL: m0_clobbered_in_loop:
+; GFX942-GISEL:       ; %bb.0: ; %entry
+; GFX942-GISEL-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX942-GISEL-NEXT:    s_mov_b64 s[2:3], 0
+; GFX942-GISEL-NEXT:    s_mov_b32 s1, 0
+; GFX942-GISEL-NEXT:  .LBB15_1: ; %loop
+; GFX942-GISEL-NEXT:    ; =>This Inner Loop Header: Depth=1
+; GFX942-GISEL-NEXT:    v_add_u32_e32 v2, -1, v2
+; GFX942-GISEL-NEXT:    s_bfe_u32 s4, s0, 0x1e0000
+; GFX942-GISEL-NEXT:    v_cmp_eq_u32_e32 vcc, 0, v2
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s1, gpr_idx(DST)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v5, v0
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:    s_or_b64 s[2:3], vcc, s[2:3]
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_on s4, gpr_idx(DST)
+; GFX942-GISEL-NEXT:    v_mov_b32_e32 v0, v1
+; GFX942-GISEL-NEXT:    s_set_gpr_idx_off
+; GFX942-GISEL-NEXT:    s_andn2_b64 exec, exec, s[2:3]
+; GFX942-GISEL-NEXT:    s_cbranch_execnz .LBB15_1
+; GFX942-GISEL-NEXT:  ; %bb.2: ; %exit
+; GFX942-GISEL-NEXT:    s_or_b64 exec, exec, s[2:3]
+; GFX942-GISEL-NEXT:    s_setpc_b64 s[30:31]
+entry:
+  br label %loop
+loop:
+  %i = phi i32 [ 0, %entry ], [ %i.next, %loop ]
+  %p0 = inttoptr i32 20 to ptr addrspace(13)
+  %pd = inttoptr i32 0  to ptr addrspace(13)
+  store volatile i32 %a, ptr addrspace(13) %p0, align 4
+  %q = getelementptr i32, ptr addrspace(13) %pd, i32 %dyn
+  store volatile i32 %b, ptr addrspace(13) %q, align 4
+  %i.next = add i32 %i, 1
+  %done = icmp eq i32 %i.next, %n
+  br i1 %done, label %exit, label %loop
+exit:
+  ret void
+}

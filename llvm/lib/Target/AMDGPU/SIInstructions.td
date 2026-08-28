@@ -1141,19 +1141,43 @@ let VOP1 = 1, Uses = [M0, EXEC], hasSideEffects = 0,
 // The pointer is a byte offset into the file; SIreg_load/SIreg_store carry the
 // dword index (ptr >> 2), and an (add idx, imm) shape folds a constant dword
 // offset into the pseudo's $offset operand.
+// A constant dword offset is only foldable into $offset while the access stays
+// inside the register file: out-of-range access is undefined behaviour, but a
+// wild offset in $offset is something the encoding cannot represent at all.
+//
+// The bound here is the 256 registers every subtarget addresses, rather than the
+// larger file some have, because a pattern predicate cannot see the subtarget.
+// That is conservative only for addresses beyond the first kilobyte of an
+// address space whose objects live in registers, so nothing real loses out.
+class VRegIdxFoldableOffset<int NumDwords> : ImmLeaf<i32, [{
+  return Imm >= 0 && Imm + }] # NumDwords # [{ <= 256;
+}]>;
+
 multiclass VRegIdxLoadStorePat<ValueType vt> {
   defvar load_inst = !cast<Instruction>("V_LOAD_IDX_B"#vt.Size);
   defvar store_inst = !cast<Instruction>("V_STORE_IDX_B"#vt.Size);
+  defvar foldable_off =
+      VRegIdxFoldableOffset<!if(!lt(vt.Size, 32), 1, !div(vt.Size, 32))>;
 
   def : GCNPat<
     (vt (SIreg_load (add i32:$idx, (i32 imm:$offset)))),
     (load_inst $idx, imm:$offset)>;
+  // A wholly constant address - an object at a known place, accessed at a known
+  // element - needs no index at all: the dword offset names the base register.
+  // Keeping the index at zero lets every such access in a function share one
+  // index register, and so one write of M0, instead of rewriting it per access.
+  def : GCNPat<
+    (vt (SIreg_load (i32 foldable_off:$offset))),
+    (load_inst (S_MOV_B32 (i32 0)), imm:$offset)>;
   def : GCNPat<
     (vt (SIreg_load i32:$idx)),
     (load_inst $idx, 0)>;
   def : GCNPat<
     (SIreg_store vt:$data, (add i32:$idx, (i32 imm:$offset))),
     (store_inst $data, $idx, imm:$offset)>;
+  def : GCNPat<
+    (SIreg_store vt:$data, (i32 foldable_off:$offset)),
+    (store_inst $data, (S_MOV_B32 (i32 0)), imm:$offset)>;
   def : GCNPat<
     (SIreg_store vt:$data, i32:$idx),
     (store_inst $data, $idx, 0)>;
@@ -1227,16 +1251,30 @@ def : GCNPat<
                         (i32 imm:$is_sext_load))),
   (V_LOAD_IDX_BITS $idx, imm:$offset, imm:$bitsize, $bitoffset,
                    imm:$is_sext_load)>;
-def : GCNPat<
-  (i32 (SIreg_load_bits i32:$idx, (i32 imm:$bitsize), i32:$bitoffset,
-                        (i32 imm:$is_sext_load))),
-  (V_LOAD_IDX_BITS $idx, 0, imm:$bitsize, $bitoffset, imm:$is_sext_load)>;
-def : GCNPat<
-  (SIreg_store_bits i32:$data, (add i32:$idx, (i32 imm:$offset)), i32:$mask),
-  (V_STORE_IDX_BITS $data, $idx, imm:$offset, $mask)>;
-def : GCNPat<
-  (SIreg_store_bits i32:$data, i32:$idx, i32:$mask),
-  (V_STORE_IDX_BITS $data, $idx, 0, $mask)>;
+  // As above, a wholly constant address needs no index. Sub-dword accesses have
+  // to agree with the whole-dword ones here: M0 holds one value at a time, so a
+  // function mixing the two forms would otherwise rewrite it back and forth
+  // between zero and the constant, costing more than either form saves.
+  def : GCNPat<
+    (i32 (SIreg_load_bits (i32 VRegIdxFoldableOffset<1>:$offset),
+                          (i32 imm:$bitsize), i32:$bitoffset,
+                          (i32 imm:$is_sext_load))),
+    (V_LOAD_IDX_BITS (S_MOV_B32 (i32 0)), imm:$offset, imm:$bitsize, $bitoffset,
+                     imm:$is_sext_load)>;
+  def : GCNPat<
+    (i32 (SIreg_load_bits i32:$idx, (i32 imm:$bitsize), i32:$bitoffset,
+                          (i32 imm:$is_sext_load))),
+    (V_LOAD_IDX_BITS $idx, 0, imm:$bitsize, $bitoffset, imm:$is_sext_load)>;
+  def : GCNPat<
+    (SIreg_store_bits i32:$data, (add i32:$idx, (i32 imm:$offset)), i32:$mask),
+    (V_STORE_IDX_BITS $data, $idx, imm:$offset, $mask)>;
+  def : GCNPat<
+    (SIreg_store_bits i32:$data, (i32 VRegIdxFoldableOffset<1>:$offset),
+                      i32:$mask),
+    (V_STORE_IDX_BITS $data, (S_MOV_B32 (i32 0)), imm:$offset, $mask)>;
+  def : GCNPat<
+    (SIreg_store_bits i32:$data, i32:$idx, i32:$mask),
+    (V_STORE_IDX_BITS $data, $idx, 0, $mask)>;
 
 // This is a pseudo variant of the v_movreld_b32 instruction in which the
 // vector operand appears only twice, once as def and once as use. Using this
