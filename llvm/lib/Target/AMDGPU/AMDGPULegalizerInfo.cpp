@@ -3551,10 +3551,9 @@ static bool lowerLoadStoreVGPR(LegalizerHelper &Helper, MachineInstr &MI) {
       }
     }
 
-    // A dword-aligned access reached through a dword-sized constant offset has
-    // a dword-aligned base, which the value tracking below cannot see for
-    // itself: the alignment is a property of the memory operand rather than of
-    // the value.
+    // A dword-aligned access at a dword-sized constant offset has a
+    // dword-aligned base. Value tracking cannot see that: the alignment
+    // belongs to the memory operand, not the value.
     bool HaveConstantBitOffset = false;
     int64_t ConstantBitOffsetVal = 0;
     if (MMO.getAlign() >= Align(4) && Offset % 4 == 0) {
@@ -3662,12 +3661,8 @@ static bool lowerLoadStoreVGPR(LegalizerHelper &Helper, MachineInstr &MI) {
 
   MachineInstrBuilder Two = B.buildConstant(I32, 2);
 
-  // Form the dword index as (base >> 2) + offset/4 rather than
-  // (base + offset) >> 2, so that a constant dword offset folds into the
-  // pseudo's $offset operand instead of costing an add and a fresh index per
-  // access. The rewrite needs the low two bits of the base to be zero, which a
-  // byte offset that is a multiple of four gives, since the access as a whole
-  // is dword aligned - checked above.
+  // As in LowerLoadStoreVGPR: form the dword index as (base >> 2) + offset/4,
+  // which needs the base's low two bits to be zero.
   const MachineFunction &MF = B.getMF();
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
   unsigned NumAddressableVGPRs =
