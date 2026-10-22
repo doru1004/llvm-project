@@ -353,6 +353,12 @@ bool GCNTTIImpl::preferSLPInstCountCheck() const {
   return !ST->hasGFX940Insts() && !ST->hasGFX950Insts();
 }
 
+bool GCNTTIImpl::preferSLPFusedFMulDiscount() const {
+  // On gfx94x the free fused scalar fmul steers SLP away from the packed trees
+  // that run faster, e.g. in the butterflies of FFT kernels.
+  return !ST->hasGFX940Insts() || ST->hasGFX950Insts();
+}
+
 unsigned GCNTTIImpl::getLoadVectorFactor(unsigned VF, unsigned LoadSize,
                                          unsigned ChainSizeInBytes,
                                          VectorType *VecTy) const {

@@ -2030,6 +2030,10 @@ public:
   /// of this heuristic.
   LLVM_ABI bool preferSLPInstCountCheck() const;
 
+  /// \returns True if the SLP vectorizer should price a scalar fmul that fuses
+  /// into its fadd/fsub user as free, false if the scalar fmul keeps its cost.
+  LLVM_ABI bool preferSLPFusedFMulDiscount() const;
+
   /// \returns True if the target prefers reductions of \p Kind to be performed
   /// in the loop.
   LLVM_ABI bool preferInLoopReduction(RecurKind Kind, Type *Ty) const;

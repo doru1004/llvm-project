@@ -11438,7 +11438,16 @@ public:
       if (!Res)
         return OrigS;
       const TTI::TargetCostKind Kind = R.getCostKind();
-      InstructionCost ScalarCost = TTI.getInstructionCost(S.getMainOp(), Kind);
+      Instruction *MainI = S.getMainOp();
+      InstructionCost ScalarCost =
+          MainOpcode == Instruction::FMul && !TTI.preferSLPFusedFMulDiscount()
+              ? TTI.getArithmeticInstrCost(
+                    MainOpcode, MainI->getType(), Kind,
+                    TTI::getOperandInfo(MainI->getOperand(0)),
+                    TTI::getOperandInfo(MainI->getOperand(1)),
+                    {MainI->getOperand(0), MainI->getOperand(1)},
+                    /*CxtI=*/nullptr, &TLI)
+              : TTI.getInstructionCost(MainI, Kind);
       InstructionCost VectorCost;
       auto *VecTy = getWidenedType(S.getMainOp()->getType(), VL.size());
       switch (MainOpcode) {
@@ -13431,7 +13440,7 @@ bool BoUpSLP::isFusedVectorizedFAddSub(Instruction *U) const {
 }
 
 InstructionCost BoUpSLP::getUnfusedFMulsPenalty(const TreeEntry &TE) const {
-  if (!TE.hasState() || TE.isGather() ||
+  if (!TTI->preferSLPFusedFMulDiscount() || !TE.hasState() || TE.isGather() ||
       (TE.getOpcode() != Instruction::FMul &&
        TE.getAltOpcode() != Instruction::FMul))
     return TTI::TCC_Free;
@@ -16961,7 +16970,8 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
                                          Instruction *VI) {
     InstructionCost Cost = canConvertToFMA(VI, S, *DT, *DL, TTI, *TLI, *this);
     Instruction *FMul = getFusableFMulOperand(VI, TTI);
-    if (!Cost.isValid() || !FMul || isVectorized(FMul))
+    if (!Cost.isValid() || !FMul || isVectorized(FMul) ||
+        !TTI.preferSLPFusedFMulDiscount())
       return Cost;
     InstructionCost FMulCost = getUnfusedBinOpCost(FMul, TTI, *TLI, CostKind);
     return Cost > FMulCost ? Cost - FMulCost : InstructionCost(TTI::TCC_Free);
@@ -16970,6 +16980,8 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
   // priced as fmuladd, otherwise the user stays scalar and only the fusion
   // delta is attributed to the fmul.
   auto GetFusedFMulCost = [&, &TTI = *TTI](Instruction *VI) {
+    if (!TTI.preferSLPFusedFMulDiscount())
+      return getUnfusedBinOpCost(VI, TTI, *TLI, CostKind);
     auto [U, FMACost] = getFMulFusingUser(VI);
     if (!U)
       return InstructionCost::getInvalid();
