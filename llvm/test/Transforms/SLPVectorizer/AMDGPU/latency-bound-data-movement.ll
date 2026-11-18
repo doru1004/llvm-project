@@ -7,21 +7,29 @@
 define void @chained_complex_muls(ptr addrspace(1) %out, float %xr, float %xi, float %wr, float %wi, float %vr, float %vi) {
 ; CHECK-LABEL: define void @chained_complex_muls(
 ; CHECK-SAME: ptr addrspace(1) [[OUT:%.*]], float [[XR:%.*]], float [[XI:%.*]], float [[WR:%.*]], float [[WI:%.*]], float [[VR:%.*]], float [[VI:%.*]]) {
-; CHECK-NEXT:    [[XR_WR:%.*]] = fmul float [[XR]], [[WR]]
-; CHECK-NEXT:    [[XI_WI:%.*]] = fmul float [[XI]], [[WI]]
-; CHECK-NEXT:    [[AR:%.*]] = fsub float [[XR_WR]], [[XI_WI]]
-; CHECK-NEXT:    [[XI_WR:%.*]] = fmul float [[XI]], [[WR]]
-; CHECK-NEXT:    [[XR_WI:%.*]] = fmul float [[XR]], [[WI]]
-; CHECK-NEXT:    [[AI:%.*]] = fadd float [[XI_WR]], [[XR_WI]]
-; CHECK-NEXT:    [[AR_VR:%.*]] = fmul float [[AR]], [[VR]]
-; CHECK-NEXT:    [[AI_VI:%.*]] = fmul float [[AI]], [[VI]]
-; CHECK-NEXT:    [[RE:%.*]] = fsub float [[AR_VR]], [[AI_VI]]
-; CHECK-NEXT:    [[AI_VR:%.*]] = fmul float [[AI]], [[VR]]
-; CHECK-NEXT:    [[AR_VI:%.*]] = fmul float [[AR]], [[VI]]
-; CHECK-NEXT:    [[IM:%.*]] = fadd float [[AI_VR]], [[AR_VI]]
-; CHECK-NEXT:    store float [[RE]], ptr addrspace(1) [[OUT]], align 8
-; CHECK-NEXT:    [[OUT_IM:%.*]] = getelementptr inbounds float, ptr addrspace(1) [[OUT]], i64 1
-; CHECK-NEXT:    store float [[IM]], ptr addrspace(1) [[OUT_IM]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = insertelement <2 x float> poison, float [[XR]], i64 0
+; CHECK-NEXT:    [[TMP2:%.*]] = insertelement <2 x float> [[TMP1]], float [[XI]], i64 1
+; CHECK-NEXT:    [[TMP3:%.*]] = insertelement <2 x float> poison, float [[WR]], i64 0
+; CHECK-NEXT:    [[TMP4:%.*]] = shufflevector <2 x float> [[TMP3]], <2 x float> poison, <2 x i32> zeroinitializer
+; CHECK-NEXT:    [[TMP5:%.*]] = fmul <2 x float> [[TMP2]], [[TMP4]]
+; CHECK-NEXT:    [[TMP6:%.*]] = insertelement <2 x float> poison, float [[WI]], i64 0
+; CHECK-NEXT:    [[TMP7:%.*]] = shufflevector <2 x float> [[TMP6]], <2 x float> poison, <2 x i32> zeroinitializer
+; CHECK-NEXT:    [[TMP8:%.*]] = fmul <2 x float> [[TMP2]], [[TMP7]]
+; CHECK-NEXT:    [[TMP9:%.*]] = shufflevector <2 x float> [[TMP8]], <2 x float> poison, <2 x i32> <i32 1, i32 0>
+; CHECK-NEXT:    [[TMP10:%.*]] = fsub <2 x float> [[TMP5]], [[TMP9]]
+; CHECK-NEXT:    [[TMP11:%.*]] = fadd <2 x float> [[TMP5]], [[TMP9]]
+; CHECK-NEXT:    [[TMP12:%.*]] = shufflevector <2 x float> [[TMP10]], <2 x float> [[TMP11]], <2 x i32> <i32 0, i32 3>
+; CHECK-NEXT:    [[TMP13:%.*]] = insertelement <2 x float> poison, float [[VR]], i64 0
+; CHECK-NEXT:    [[TMP14:%.*]] = shufflevector <2 x float> [[TMP13]], <2 x float> poison, <2 x i32> zeroinitializer
+; CHECK-NEXT:    [[TMP15:%.*]] = fmul <2 x float> [[TMP12]], [[TMP14]]
+; CHECK-NEXT:    [[TMP16:%.*]] = shufflevector <2 x float> [[TMP12]], <2 x float> poison, <2 x i32> <i32 1, i32 0>
+; CHECK-NEXT:    [[TMP17:%.*]] = insertelement <2 x float> poison, float [[VI]], i64 0
+; CHECK-NEXT:    [[TMP18:%.*]] = shufflevector <2 x float> [[TMP17]], <2 x float> poison, <2 x i32> zeroinitializer
+; CHECK-NEXT:    [[TMP19:%.*]] = fmul <2 x float> [[TMP16]], [[TMP18]]
+; CHECK-NEXT:    [[TMP20:%.*]] = fsub <2 x float> [[TMP15]], [[TMP19]]
+; CHECK-NEXT:    [[TMP21:%.*]] = fadd <2 x float> [[TMP15]], [[TMP19]]
+; CHECK-NEXT:    [[TMP22:%.*]] = shufflevector <2 x float> [[TMP20]], <2 x float> [[TMP21]], <2 x i32> <i32 0, i32 3>
+; CHECK-NEXT:    store <2 x float> [[TMP22]], ptr addrspace(1) [[OUT]], align 8
 ; CHECK-NEXT:    ret void
 ;
   %xr.wr = fmul float %xr, %wr
@@ -171,27 +179,34 @@ define void @chained_complex_muls_across_branch(ptr addrspace(1) %out, float %xr
 ; CHECK-LABEL: define void @chained_complex_muls_across_branch(
 ; CHECK-SAME: ptr addrspace(1) [[OUT:%.*]], float [[XR:%.*]], float [[XI:%.*]], float [[WR:%.*]], float [[WI:%.*]], float [[VR:%.*]], float [[VI:%.*]], i1 [[C:%.*]]) {
 ; CHECK-NEXT:  [[ENTRY:.*]]:
-; CHECK-NEXT:    [[XR_WR:%.*]] = fmul float [[XR]], [[WR]]
-; CHECK-NEXT:    [[XI_WI:%.*]] = fmul float [[XI]], [[WI]]
-; CHECK-NEXT:    [[AR:%.*]] = fsub float [[XR_WR]], [[XI_WI]]
-; CHECK-NEXT:    [[XI_WR:%.*]] = fmul float [[XI]], [[WR]]
-; CHECK-NEXT:    [[XR_WI:%.*]] = fmul float [[XR]], [[WI]]
-; CHECK-NEXT:    [[AI:%.*]] = fadd float [[XI_WR]], [[XR_WI]]
+; CHECK-NEXT:    [[TMP0:%.*]] = insertelement <2 x float> poison, float [[XR]], i64 0
+; CHECK-NEXT:    [[TMP1:%.*]] = insertelement <2 x float> [[TMP0]], float [[XI]], i64 1
+; CHECK-NEXT:    [[TMP2:%.*]] = insertelement <2 x float> poison, float [[WR]], i64 0
+; CHECK-NEXT:    [[TMP3:%.*]] = shufflevector <2 x float> [[TMP2]], <2 x float> poison, <2 x i32> zeroinitializer
+; CHECK-NEXT:    [[TMP4:%.*]] = fmul <2 x float> [[TMP1]], [[TMP3]]
+; CHECK-NEXT:    [[TMP5:%.*]] = insertelement <2 x float> poison, float [[WI]], i64 0
+; CHECK-NEXT:    [[TMP6:%.*]] = shufflevector <2 x float> [[TMP5]], <2 x float> poison, <2 x i32> zeroinitializer
+; CHECK-NEXT:    [[TMP7:%.*]] = fmul <2 x float> [[TMP1]], [[TMP6]]
+; CHECK-NEXT:    [[TMP8:%.*]] = shufflevector <2 x float> [[TMP7]], <2 x float> poison, <2 x i32> <i32 1, i32 0>
+; CHECK-NEXT:    [[TMP9:%.*]] = fsub <2 x float> [[TMP4]], [[TMP8]]
+; CHECK-NEXT:    [[TMP10:%.*]] = fadd <2 x float> [[TMP4]], [[TMP8]]
+; CHECK-NEXT:    [[TMP11:%.*]] = shufflevector <2 x float> [[TMP9]], <2 x float> [[TMP10]], <2 x i32> <i32 0, i32 3>
 ; CHECK-NEXT:    br i1 [[C]], label %[[THEN:.*]], label %[[JOIN:.*]]
 ; CHECK:       [[THEN]]:
-; CHECK-NEXT:    [[AR_VR:%.*]] = fmul float [[AR]], [[VR]]
-; CHECK-NEXT:    [[AI_VI:%.*]] = fmul float [[AI]], [[VI]]
-; CHECK-NEXT:    [[BR:%.*]] = fsub float [[AR_VR]], [[AI_VI]]
-; CHECK-NEXT:    [[AI_VR:%.*]] = fmul float [[AI]], [[VR]]
-; CHECK-NEXT:    [[AR_VI:%.*]] = fmul float [[AR]], [[VI]]
-; CHECK-NEXT:    [[BI:%.*]] = fadd float [[AI_VR]], [[AR_VI]]
+; CHECK-NEXT:    [[TMP12:%.*]] = insertelement <2 x float> poison, float [[VR]], i64 0
+; CHECK-NEXT:    [[TMP13:%.*]] = shufflevector <2 x float> [[TMP12]], <2 x float> poison, <2 x i32> zeroinitializer
+; CHECK-NEXT:    [[TMP14:%.*]] = fmul <2 x float> [[TMP11]], [[TMP13]]
+; CHECK-NEXT:    [[TMP15:%.*]] = shufflevector <2 x float> [[TMP11]], <2 x float> poison, <2 x i32> <i32 1, i32 0>
+; CHECK-NEXT:    [[TMP16:%.*]] = insertelement <2 x float> poison, float [[VI]], i64 0
+; CHECK-NEXT:    [[TMP17:%.*]] = shufflevector <2 x float> [[TMP16]], <2 x float> poison, <2 x i32> zeroinitializer
+; CHECK-NEXT:    [[TMP18:%.*]] = fmul <2 x float> [[TMP15]], [[TMP17]]
+; CHECK-NEXT:    [[TMP19:%.*]] = fsub <2 x float> [[TMP14]], [[TMP18]]
+; CHECK-NEXT:    [[TMP20:%.*]] = fadd <2 x float> [[TMP14]], [[TMP18]]
+; CHECK-NEXT:    [[TMP21:%.*]] = shufflevector <2 x float> [[TMP19]], <2 x float> [[TMP20]], <2 x i32> <i32 0, i32 3>
 ; CHECK-NEXT:    br label %[[JOIN]]
 ; CHECK:       [[JOIN]]:
-; CHECK-NEXT:    [[RE:%.*]] = phi float [ [[AR]], %[[ENTRY]] ], [ [[BR]], %[[THEN]] ]
-; CHECK-NEXT:    [[IM:%.*]] = phi float [ [[AI]], %[[ENTRY]] ], [ [[BI]], %[[THEN]] ]
-; CHECK-NEXT:    store float [[RE]], ptr addrspace(1) [[OUT]], align 8
-; CHECK-NEXT:    [[OUT_IM:%.*]] = getelementptr inbounds float, ptr addrspace(1) [[OUT]], i64 1
-; CHECK-NEXT:    store float [[IM]], ptr addrspace(1) [[OUT_IM]], align 4
+; CHECK-NEXT:    [[TMP22:%.*]] = phi <2 x float> [ [[TMP11]], %[[ENTRY]] ], [ [[TMP21]], %[[THEN]] ]
+; CHECK-NEXT:    store <2 x float> [[TMP22]], ptr addrspace(1) [[OUT]], align 8
 ; CHECK-NEXT:    ret void
 ;
 entry:

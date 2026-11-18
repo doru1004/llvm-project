@@ -302,6 +302,15 @@ bool GCNTTIImpl::preferSLPInstCountCheck() const {
   return !ST->hasGFX940Insts() && !ST->hasGFX950Insts();
 }
 
+unsigned GCNTTIImpl::getSLPLatencyBoundBlockSize() const {
+  // Only the throughput cost includes the moves that form the operand pairs of
+  // v_pk_*_f32 (see getVectorInstrCost and getShuffleCost). In a short block at
+  // the end of a long chain of dependent FP operations, the packed form can be
+  // faster although it executes these moves. Where the instruction-count check
+  // applies, it rejects such trees anyway.
+  return preferSLPInstCountCheck() ? 0 : 128;
+}
+
 unsigned GCNTTIImpl::getLoadVectorFactor(unsigned VF, unsigned LoadSize,
                                          unsigned ChainSizeInBytes,
                                          VectorType *VecTy) const {

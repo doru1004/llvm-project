@@ -2052,6 +2052,13 @@ public:
   /// of this heuristic.
   LLVM_ABI bool preferSLPInstCountCheck() const;
 
+  /// \returns the largest number of instructions a block outside any loop can
+  /// have for the SLP vectorizer to price the data movement of its trees, their
+  /// shuffles, inserts and extracts, for latency when a long chain of dependent
+  /// floating-point operations ends in it, or 0 to always price it for
+  /// throughput.
+  LLVM_ABI unsigned getSLPLatencyBoundBlockSize() const;
+
   /// \returns True if the target prefers reductions of \p Kind to be performed
   /// in the loop.
   LLVM_ABI bool preferInLoopReduction(RecurKind Kind, Type *Ty) const;

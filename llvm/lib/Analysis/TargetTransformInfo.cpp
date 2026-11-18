@@ -1575,6 +1575,10 @@ bool TargetTransformInfo::preferSLPInstCountCheck() const {
   return TTIImpl->preferSLPInstCountCheck();
 }
 
+unsigned TargetTransformInfo::getSLPLatencyBoundBlockSize() const {
+  return TTIImpl->getSLPLatencyBoundBlockSize();
+}
+
 bool TargetTransformInfo::preferPredicatedReductionSelect() const {
   return TTIImpl->preferPredicatedReductionSelect();
 }

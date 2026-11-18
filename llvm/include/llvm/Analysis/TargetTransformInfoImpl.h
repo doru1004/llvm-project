@@ -1193,6 +1193,8 @@ public:
 
   virtual bool preferSLPInstCountCheck() const { return true; }
 
+  virtual unsigned getSLPLatencyBoundBlockSize() const { return 0; }
+
   virtual bool preferPredicatedReductionSelect() const { return false; }
 
   virtual bool preferEpilogueVectorization(ElementCount Iters) const {
